@@ -1,0 +1,5 @@
+CompetitionID,CompetitionName,games_played,team_end_count,powerplays,unique_powerplay_ends,power_play_rate_team_end,power_play_rate_game
+0,Beijing 2022 Olympic Winter Games,4,774,85,20,0.10981912144702842,21.25
+22230015,World Mixed Doubles Curling Championship 2023,5,1494,172,28,0.11512717536813923,34.4
+23240026,World Mixed Doubles Curling Championship 2024,5,1502,166,27,0.11051930758988016,33.2
+24250026,World Mixed Doubles Curling Championship 2025,5,1504,175,29,0.1163563829787234,35.0
