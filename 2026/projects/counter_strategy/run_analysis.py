@@ -24,6 +24,7 @@ from projects.counter_strategy.src.opponent_clustering import (
     FEATURE_COLUMNS,
 )
 from projects.counter_strategy.src.defense_optimizer import DefenseOption, minimax_defense
+from projects.counter_strategy.src.empirical_priors import compute_empirical_priors, get_default_priors
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "outputs"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -43,171 +44,73 @@ def load_powerplay_ends() -> pd.DataFrame:
 
 def compute_cluster_distributions(ends: pd.DataFrame, assignment: pd.DataFrame) -> Dict[int, pd.Series]:
     score_values = sorted(ends["Result"].unique())
+    # Ensure range covers typical scores e.g. -2 to 5
+    full_score_range = list(range(min(score_values), max(score_values) + 1))
+    
     cluster_distributions: Dict[int, pd.Series] = {}
     for cluster_id, group in assignment.groupby("cluster"):
         members = group["TeamID"].tolist()
         subset = ends[ends["TeamID"].isin(members)]
-        dist = subset["Result"].value_counts().reindex(score_values, fill_value=0)
+        dist = subset["Result"].value_counts().reindex(full_score_range, fill_value=0)
         cluster_distributions[cluster_id] = dist / dist.sum()
-    return cluster_distributions
+    return cluster_distributions, full_score_range
 
 
-def compute_layout_distributions(ends: pd.DataFrame, assignment: pd.DataFrame) -> tuple[List[int], Dict[tuple[int, int], pd.Series]]:
-    score_values = sorted(ends["Result"].unique())
-    distributions: Dict[tuple[int, int], pd.Series] = {}
-
-    for cluster_id, group in assignment.groupby("cluster"):
-        members = group["TeamID"].tolist()
-        subset = ends[ends["TeamID"].isin(members)]
-
-        for layout_value, layout_group in subset.groupby("PowerPlay"):
-            counts = layout_group["Result"].value_counts().reindex(score_values, fill_value=0)
-            total = counts.sum()
-            if total == 0:
-                continue
-            distributions[(cluster_id, int(layout_value))] = counts / total
-
-    return score_values, distributions
-
-
-def build_defense_options(score_values: List[int]) -> List[DefenseOption]:
-    guard_impact = [max(val - 1, -1) if val >= 3 else val for val in score_values]
-    freeze_impact = [val - 1 if val >= 2 else val for val in score_values]
-    runback_impact = [val - 0.5 if val <= 0 else val + 0.3 for val in score_values]
-
-    return [
-        DefenseOption(name="Guard Wall", success_prob=0.75, score_impact=guard_impact),
-        DefenseOption(name="Freeze Tap", success_prob=0.65, score_impact=freeze_impact),
-        DefenseOption(name="Runback Pressure", success_prob=0.55, score_impact=runback_impact),
-    ]
-
-
-def evaluate_defenses(cluster_distributions: Dict[int, pd.Series]) -> pd.DataFrame:
+def evaluate_defenses(
+    cluster_distributions: Dict[int, pd.Series], 
+    score_values: List[int],
+    options: List[DefenseOption],
+    objective: str = "expected_value"
+) -> pd.DataFrame:
     if not cluster_distributions:
         return pd.DataFrame()
-
-    score_values = cluster_distributions[next(iter(cluster_distributions))].index.tolist()
-    options = build_defense_options(score_values)
 
     records = []
     for cluster_id, dist in cluster_distributions.items():
         opponent_distribution = dist.values
+        
+        # Calculate baseline EV
         baseline_ev = np.dot(opponent_distribution, np.array(score_values))
+        
+        # Run Optimizer
+        best_option = minimax_defense(options, opponent_distribution, score_values, objective)
+        
+        if best_option is None:
+            # Should not happen with fixed logic, but safe fallback
+            continue
+            
+        # Calculate values for all options for reporting
         option_values = {}
         for option in options:
-            mitigated = np.dot(opponent_distribution, option.score_impact)
-            expected = option.success_prob * mitigated + (1 - option.success_prob) * baseline_ev
-            option_values[option.name] = expected
-
-        best_option = min(option_values.items(), key=lambda item: item[1])[0]
-        best_value = option_values[best_option]
+            # Re-use logic from optimizer to get the value for this objective
+            is_distribution = np.isclose(np.sum(option.score_impact), 1.0)
+            if is_distribution:
+                final_dist = np.array(option.score_impact)
+                if objective == "expected_value":
+                    val = np.dot(final_dist, score_values)
+                elif objective == "minimize_big_end":
+                    big_score_indices = [i for i, s in enumerate(score_values) if s >= 3]
+                    val = np.sum(final_dist[big_score_indices])
+                elif objective == "maximize_steal":
+                    steal_indices = [i for i, s in enumerate(score_values) if s < 0]
+                    val = np.sum(final_dist[steal_indices])
+            else:
+                # Legacy fallback
+                val = np.dot(opponent_distribution, option.score_impact) * option.success_prob
+            
+            option_values[option.name] = val
 
         records.append(
             {
                 "cluster": cluster_id,
+                "objective": objective,
                 "baseline_expected_points": baseline_ev,
-                "recommended_option": best_option,
-                "recommended_expected_points": best_value,
-                "reduction": baseline_ev - best_value,
+                "recommended_option": best_option.name,
+                "best_value": option_values[best_option.name],
                 **option_values,
             }
         )
     return pd.DataFrame(records)
-
-
-SCENARIOS = [
-    {"name": "baseline"},
-    {"name": "freeze_cooldown", "global": {"Freeze Tap": {"success_prob": 0.5}}},
-    {
-        "name": "runback_hot",
-        "global": {
-            "Runback Pressure": {"success_prob": 0.8, "score_shift": -1.0},
-            "Freeze Tap": {"success_prob": 0.6, "score_shift": 0.2},
-        },
-    },
-    {
-        "name": "guard_wall_plus",
-        "global": {
-            "Guard Wall": {"success_prob": 0.9, "score_shift": -0.7},
-            "Freeze Tap": {"success_prob": 0.55, "score_shift": 0.3},
-        },
-    },
-    {
-        "name": "corner_runback_edge",
-        "layout": {
-            2: {
-                "Runback Pressure": {"success_prob": 0.82, "score_shift": -0.8},
-                "Freeze Tap": {"success_prob": 0.55, "score_shift": 0.25},
-            }
-        },
-    },
-]
-
-
-def apply_adjustments(options: List[DefenseOption], adjustments: Dict[str, Dict[str, float]]) -> List[DefenseOption]:
-    if not adjustments:
-        return options
-
-    adjusted = []
-    for opt in options:
-        overrides = adjustments.get(opt.name, {})
-        success_prob = overrides.get("success_prob", opt.success_prob)
-        impact = np.array(opt.score_impact, dtype=float)
-        if "score_shift" in overrides:
-            impact = impact + overrides["score_shift"]
-        if "score_multiplier" in overrides:
-            impact = impact * overrides["score_multiplier"]
-        if "score_impact" in overrides:
-            impact = np.array(overrides["score_impact"], dtype=float)
-        adjusted.append(
-            DefenseOption(name=opt.name, success_prob=success_prob, score_impact=impact.tolist())
-        )
-    return adjusted
-
-
-def stress_test_defenses(
-    score_values: List[int],
-    layout_distributions: Dict[tuple[int, int], pd.Series],
-    scenarios: List[Dict[str, Dict[str, Dict[str, float]]]],
-) -> pd.DataFrame:
-    scenario_records = []
-
-    for scenario in scenarios:
-        scenario_name = scenario["name"]
-        global_overrides = scenario.get("global", {})
-        layout_overrides = scenario.get("layout", {})
-
-        for (cluster_id, layout), dist in layout_distributions.items():
-            baseline_ev = np.dot(dist.values, np.array(score_values))
-            options = build_defense_options(score_values)
-            options = apply_adjustments(options, global_overrides)
-            if layout in layout_overrides:
-                options = apply_adjustments(options, layout_overrides[layout])
-
-            option_values = {}
-            for option in options:
-                mitigated = np.dot(dist.values, option.score_impact)
-                expected = option.success_prob * mitigated + (1 - option.success_prob) * baseline_ev
-                option_values[option.name] = expected
-
-            best_option = min(option_values.items(), key=lambda item: item[1])[0]
-            best_value = option_values[best_option]
-
-            scenario_records.append(
-                {
-                    "scenario": scenario_name,
-                    "cluster": cluster_id,
-                    "layout": layout,
-                    "layout_label": LAYOUT_LABELS.get(layout, f"Layout {layout}"),
-                    "baseline_expected_points": baseline_ev,
-                    "recommended_option": best_option,
-                    "recommended_expected_points": best_value,
-                    "reduction": baseline_ev - best_value,
-                    **option_values,
-                }
-            )
-
-    return pd.DataFrame(scenario_records)
 
 
 def plot_cluster_scatter(assignment: pd.DataFrame) -> None:
@@ -230,125 +133,140 @@ def plot_cluster_scatter(assignment: pd.DataFrame) -> None:
     plt.close()
 
 
-def plot_defense_bars(summary: pd.DataFrame) -> None:
-    value_columns = [
-        col
-        for col in summary.columns
-        if col not in {"cluster", "baseline_expected_points", "recommended_option", "recommended_expected_points", "reduction"}
-    ]
-    melted = summary.melt(
-        id_vars=["cluster", "baseline_expected_points", "recommended_option"],
-        value_vars=value_columns,
-        var_name="defense_option",
-        value_name="expected_points",
-    )
-
-    plt.figure(figsize=(10, 5))
-    sns.barplot(data=melted, x="cluster", y="expected_points", hue="defense_option")
-    plt.axhline(0, color="black", linewidth=1)
-    plt.ylabel("Expected opponent points")
-    plt.xlabel("Cluster")
-    plt.title("Defense scenario evaluation by cluster")
+def plot_score_distributions(options: List[DefenseOption], output_path: Path) -> None:
+    """Violin plot of score distributions for each strategy."""
+    data = []
+    for opt in options:
+        # Reconstruct samples from probability distribution
+        # We assume range -2 to 6 for visualization
+        score_range = list(range(-2, 7))
+        # Pad or trim score_impact to match range length if needed
+        # But score_impact is likely already aligned to a range.
+        # For simplicity, let's just use the indices of the list as offsets from min_score
+        # Assuming score_impact corresponds to [min_score, ..., max_score]
+        
+        # Actually, let's just simulate samples based on the probs
+        probs = np.array(opt.score_impact)
+        if probs.sum() == 0: continue
+        probs = probs / probs.sum()
+        
+        # Assume standard range start if not provided. 
+        # In compute_empirical_priors we used full_score_range.
+        # Let's assume it starts at -2 (typical for curling power play)
+        start_score = -2
+        
+        samples = np.random.choice(
+            range(start_score, start_score + len(probs)), 
+            size=1000, 
+            p=probs
+        )
+        
+        for s in samples:
+            data.append({"Strategy": opt.name, "Score": s})
+            
+    df = pd.DataFrame(data)
+    
+    plt.figure(figsize=(10, 6))
+    sns.violinplot(data=df, x="Strategy", y="Score", inner="quartile", palette="muted")
+    plt.title("Score Distribution by Defensive Strategy")
+    plt.ylabel("Opponent Score (Lower is Better)")
+    plt.grid(True, axis="y", linestyle="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / "defense_option_comparison.png", dpi=200)
+    plt.savefig(output_path, dpi=300, facecolor='white', transparent=False)
     plt.close()
 
-
-def plot_defense_delta(summary: pd.DataFrame) -> None:
-    ordered = summary.sort_values("reduction", ascending=False)
-
-    plt.figure(figsize=(8, 4))
-    sns.barplot(
-        data=ordered,
-        x="reduction",
-        y="cluster",
-        color="#2ca02c",
-    )
-    plt.xlabel("Reduction in opponent expected points")
-    plt.ylabel("Cluster")
-    plt.title("Impact of Recommended Defense")
-    plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / "defense_reduction.png", dpi=200)
-    plt.close()
-
-
-def plot_stress_test_matrix(scenario_df: pd.DataFrame) -> None:
-    if scenario_df.empty:
-        return
-
-    scenario_df = scenario_df.copy()
-    scenario_df["cluster_layout"] = (
-        "Cluster "
-        + scenario_df["cluster"].astype(str)
-        + " - "
-        + scenario_df["layout_label"]
-    )
-
-    pivot = scenario_df.pivot(index="cluster_layout", columns="scenario", values="recommended_option")
-
-    option_palette = {"Guard Wall": 0, "Freeze Tap": 1, "Runback Pressure": 2}
-    numeric = pivot.replace(option_palette)
-
-    plt.figure(figsize=(max(8, len(SCENARIOS) * 1.2), max(4, len(pivot) * 0.6)))
-    ax = sns.heatmap(
-        numeric,
-        cmap="viridis",
-        cbar=False,
-        annot=pivot,
-        fmt="",
-        linewidths=0.5,
-    )
-    ax.set_xlabel("Scenario")
-    ax.set_ylabel("Cluster & layout")
-    ax.set_title("Recommended defense across stress tests")
-    plt.tight_layout()
-    plt.savefig(OUTPUT_DIR / "stress_test_matrix.png", dpi=200)
-    plt.close()
-
+from projects.counter_strategy.src.execution_analysis import analyze_execution_sensitivity, plot_execution_risk
 
 def main() -> None:
+    print("Loading data and clustering opponents...")
     feature_frame = build_feature_table()
     model = fit_opponent_clusters(feature_frame)
     assignment = assign_clusters(feature_frame, model)
 
     ends = load_powerplay_ends()
-    cluster_distributions = compute_cluster_distributions(ends, assignment)
-    score_values, layout_distributions = compute_layout_distributions(ends, assignment)
-    defense_summary = evaluate_defenses(cluster_distributions)
-    enriched = assignment.merge(defense_summary[["cluster", "recommended_option"]], on="cluster", how="left")
+    cluster_distributions, score_values = compute_cluster_distributions(ends, assignment)
+    
+    print("Computing empirical priors from historical shots...")
+    try:
+        options, prior_score_range = compute_empirical_priors()
+        if not options:
+             print("Insufficient data for empirical priors. Using defaults.")
+             options = get_default_priors(score_values)
+        else:
+             aligned_options = []
+             for opt in options:
+                 prior_series = pd.Series(opt.score_impact, index=prior_score_range)
+                 aligned_series = prior_series.reindex(score_values, fill_value=0)
+                 if aligned_series.sum() > 0:
+                     aligned_series = aligned_series / aligned_series.sum()
+                 
+                 aligned_options.append(
+                     DefenseOption(name=opt.name, success_prob=opt.success_prob, score_impact=aligned_series.values.tolist())
+                 )
+             options = aligned_options
+             
+    except Exception as e:
+        print(f"Error computing empirical priors: {e}. Using defaults.")
+        options = get_default_priors(score_values)
 
+    print(f"Evaluated {len(options)} defensive strategies: {[o.name for o in options]}")
+    
+    # --- New Visualization ---
+    plot_score_distributions(options, OUTPUT_DIR / "score_distributions.png")
+    # -------------------------
+    
+    # --- Execution Analysis ---
+    print("Running execution sensitivity analysis...")
+    exec_stats, exec_profiles = analyze_execution_sensitivity()
+    if not exec_stats.empty:
+        exec_stats.to_csv(OUTPUT_DIR / "execution_sensitivity.csv", index=False)
+        plot_execution_risk(exec_profiles, OUTPUT_DIR / "execution_risk_scatter.png")
+        print("Execution analysis generated.")
+    # --------------------------
+
+    # Evaluate for different objectives
+    objectives = ["expected_value", "minimize_big_end", "maximize_steal"]
+    all_results = []
+    
+    for obj in objectives:
+        print(f"Running optimization for objective: {obj}")
+        res = evaluate_defenses(cluster_distributions, score_values, options, objective=obj)
+        all_results.append(res)
+        
+    full_summary = pd.concat(all_results)
+    full_summary.to_csv(OUTPUT_DIR / "defense_summary.csv", index=False)
+
+    # Generate Risk Playbook
+    risk_playbook = full_summary.pivot(index="cluster", columns="objective", values="recommended_option")
+    
     teams = pd.read_csv(PROJECT_ROOT / "Teams.csv")[["CompetitionID", "TeamID", "Name"]]
     team_lookup = teams.sort_values("CompetitionID").drop_duplicates("TeamID")
-    enriched = enriched.merge(team_lookup[["TeamID", "Name"]], on="TeamID", how="left")
-
-    plot_cluster_scatter(enriched)
-    if not defense_summary.empty:
-        plot_defense_bars(defense_summary)
-        plot_defense_delta(defense_summary)
-
-        playbook = (
-            enriched.sort_values("usage_count", ascending=False)
-            .groupby("cluster")
-            .head(5)
-            .loc[:, ["cluster", "Name", "usage_count", "avg_score_gain", "three_plus_rate", "recommended_option"]]
-            .rename(
-                columns={
-                    "Name": "Team",
-                    "usage_count": "PowerPlayEnds",
-                    "avg_score_gain": "AvgPoints",
-                    "three_plus_rate": "Rate3Plus",
-                }
-            )
-        )
-        playbook.to_csv(OUTPUT_DIR / "cluster_playbook.csv", index=False)
-
-    scenario_df = stress_test_defenses(score_values, layout_distributions, SCENARIOS)
-    if not scenario_df.empty:
-        scenario_df.to_csv(OUTPUT_DIR / "defense_stress_tests.csv", index=False)
-        plot_stress_test_matrix(scenario_df)
-
+    
+    top_teams = (
+        assignment.sort_values("usage_count", ascending=False)
+        .groupby("cluster")
+        .head(3)
+    )
+    
+    playbook_export = top_teams.merge(risk_playbook, on="cluster", how="left")
+    
+    available_objectives = [col for col in ["expected_value", "minimize_big_end", "maximize_steal"] if col in playbook_export.columns]
+    
+    playbook_export = playbook_export[["cluster", "TeamID"] + available_objectives]
+    playbook_export = playbook_export.merge(team_lookup[["TeamID", "Name"]], on="TeamID", how="left")
+    
+    rename_map = {
+        "expected_value": "Standard (Best EV)",
+        "minimize_big_end": "Conservative (Avoid Big End)",
+        "maximize_steal": "Aggressive (Need Steal)"
+    }
+    playbook_export = playbook_export.rename(columns=rename_map)
+    
+    playbook_export.to_csv(OUTPUT_DIR / "risk_playbook.csv", index=False)
+    
+    enriched = assignment.merge(team_lookup[["TeamID", "Name"]], on="TeamID", how="left")
     enriched.to_csv(OUTPUT_DIR / "cluster_assignments.csv", index=False)
-    defense_summary.to_csv(OUTPUT_DIR / "defense_summary.csv", index=False)
+    plot_cluster_scatter(enriched)
 
     print("Counter-strategy outputs generated at", OUTPUT_DIR)
 

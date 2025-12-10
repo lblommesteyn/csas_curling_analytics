@@ -1,0 +1,162 @@
+\documentclass[11pt, a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{subcaption}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+
+\geometry{margin=1in}
+\setlength{\parskip}{0.5em}
+
+\title{\textbf{Counter-Strategy Simulator: \\ A Data-Driven Approach to Mixed Doubles Defense}}
+\author{CSAS Data Challenge 2026}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\noindent This report details the development and capabilities of the \textbf{Counter-Strategy Simulator}, an advanced analytics tool designed to optimize defensive decision-making in Mixed Doubles Curling. By leveraging historical shot data and opponent clustering, the simulator provides tailored defensive recommendations ("Playbooks") that account for opponent tendencies, execution risk, and game score situations. Key innovations include the integration of empirical success rates from over 26,000 shots and a novel "Risk Profile" optimization engine formalized through Minimax game theory.
+\end{abstract}
+
+\section{Introduction}
+In Mixed Doubles Curling, the Power Play is a critical strategic element that significantly alters the probability landscape of an end. Unlike the traditional game, where defensive play is often reactive, the pre-positioned stones in Mixed Doubles require a proactive and calculated defensive strategy (Shot 1).
+
+Traditional coaching relies on intuition or generic "best practices" (e.g., "always freeze"). However, these heuristics fail to account for:
+\begin{enumerate}
+    \item \textbf{Opponent Heterogeneity:} Not all teams play the Power Play the same way. Some are aggressive scorers, while others are conservative.
+    \item \textbf{Execution Risk:} The theoretical "best shot" might be too risky for a team with average execution.
+    \item \textbf{Score Context:} A strategy that minimizes expected score might be suboptimal when protecting a lead or chasing a game.
+\end{enumerate}
+
+Our solution replaces intuition with a rigorous, quantitative framework, utilizing Gaussian Mixture Models (GMM) for opponent profiling and Minimax optimization for decision making.
+
+\section{Methodology}
+
+\subsection{Opponent Clustering (GMM)}
+To tailor our defensive strategy, we first categorize opponents into distinct archetypes. We employ a Gaussian Mixture Model (GMM) to cluster teams based on their historical Power Play performance vectors $x_i \in \mathbb{R}^3$. The feature vector $x_i$ consists of:
+\begin{itemize}
+    \item Average Score Gain ($\mu_{score}$)
+    \item Rate of Big Ends ($P(Score \ge 3)$)
+    \item Steal Rate ($P(Score < 0)$)
+\end{itemize}
+
+The probability density of an observed team vector $x$ is given by a weighted sum of $K$ Gaussian components:
+\begin{equation}
+    p(x) = \sum_{k=1}^{K} \pi_k \mathcal{N}(x | \mu_k, \Sigma_k)
+\end{equation}
+where:
+\begin{itemize}
+    \item $\pi_k$ is the mixing coefficient, representing the prior probability that a randomly selected team belongs to cluster $k$.
+    \item $\mu_k$ is the mean vector, representing the "average" performance of teams in that cluster.
+    \item $\Sigma_k$ is the covariance matrix, capturing the variance and correlation between features. A diagonal $\Sigma_k$ would imply independent features, but we allow for full covariance to capture correlations (e.g., teams that score big ends might also give up more steals).
+\end{itemize}
+
+We selected $K=3$ based on the Bayesian Information Criterion (BIC), identifying three distinct archetypes: "Aggressive Scorers," "Conservative Controllers," and "Balanced."
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/cluster_scatter.png}
+    \caption{\textbf{Opponent Archetypes.} Teams are clustered by their Power Play efficiency. This segmentation allows us to predict how an opponent will react to our defensive setup.}
+    \label{fig:clusters}
+\end{figure}
+
+\subsection{Empirical Priors}
+Unlike previous models that relied on hardcoded assumptions, our simulator integrates real-world data from the \texttt{Stones.csv} dataset. We analyzed the outcomes of thousands of "Shot 1" defensive stones to construct empirical probability distributions for the final end score.
+
+For a given defensive strategy $d$ (e.g., Freeze Tap, Guard Wall), we estimate the probability distribution of the opponent's score $S$:
+\begin{equation}
+    P(S=s | d) = \frac{\text{Count}(Result=s, Strategy=d)}{\text{Total Count}(Strategy=d)}
+\end{equation}
+This data-driven approach captures the "hidden" risks and rewards of each shot, such as the likelihood of giving up a big end if a freeze is slightly heavy.
+
+\subsection{Risk-Aware Optimization (Minimax)}
+We model the end as a zero-sum game where we minimize a loss function $L(s)$ associated with the opponent's score $s$. The optimal strategy $d^*$ is chosen to minimize the expected loss:
+\begin{equation}
+    d^* = \arg \min_{d \in D} \mathbb{E}[L(S) | d] = \arg \min_{d \in D} \sum_{s} L(s) P(S=s | d)
+\end{equation}
+
+We introduce three distinct \textbf{Risk Profiles} by varying the loss function $L(s)$. The choice of $L(s)$ dictates the agent's behavior:
+
+\subsubsection{1. Standard Profile (Expected Value)}
+Minimizes the raw expected score. This is the risk-neutral approach, ideal for the early game or tied scores.
+\begin{equation}
+    L_{std}(s) = s
+\end{equation}
+
+\subsubsection{2. Conservative Profile (Minimize Big Ends)}
+Heavily penalizes large scores. We introduce a non-linear penalty for scores $\ge 3$. The value $10$ is chosen to be significantly larger than any typical score, effectively acting as a "soft constraint" against big ends.
+\begin{equation}
+    L_{cons}(s) = \begin{cases} 
+    10 & \text{if } s \ge 3 \\
+    s & \text{otherwise}
+    \end{cases}
+\end{equation}
+
+\subsubsection{3. Aggressive Profile (Maximize Steals)}
+Incentivizes stealing (negative opponent score). We assign a "bonus" (negative loss) of $-5$ to any score $< 0$. This encourages the agent to choose high-variance strategies that might result in a steal, even if they risk giving up a single point.
+\begin{equation}
+    L_{aggr}(s) = \begin{cases} 
+    -5 & \text{if } s < 0 \\
+    s & \text{otherwise}
+    \end{cases}
+\end{equation}
+
+\section{Analysis \& Results}
+
+\subsection{Probability Landscapes}
+We analyzed the score distributions for each major defensive strategy. Figure \ref{fig:violins} illustrates the variance in outcomes.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/score_distributions.png}
+    \caption{\textbf{Score Distributions.} The "Freeze Tap" shows a tighter distribution around low scores (0-1), indicating its effectiveness in neutralizing the Power Play. "Runback Pressure" has a longer tail, indicating a higher risk of giving up big ends.}
+    \label{fig:violins}
+\end{figure}
+
+\subsection{Deep Dive: Execution Sensitivity}
+A strategy is only as good as its execution. We analyzed the "Forgiveness" of each defensive option by comparing the Expected Value (EV) of "High Quality" shots (Points 3-4) versus "Low Quality" shots (Points 0-2).
+
+Let $E_{high}$ be the expected score given high execution (Points $\ge 3$), and $E_{low}$ be the expected score given low execution (Points $< 3$). We define the \textbf{Forgiveness Factor} $\phi$ as the inverse of the performance drop-off:
+\begin{equation}
+    \phi = \frac{1}{E_{low} - E_{high}}
+\end{equation}
+A higher $\phi$ indicates a strategy that is less sensitive to execution errors. For example, if missing a shot results in a massive score swing (high $E_{low} - E_{high}$), $\phi$ will be small, indicating a "fragile" strategy. Conversely, a "robust" strategy will have a similar EV regardless of execution quality, resulting in a large $\phi$.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/execution_risk_scatter.png}
+    \caption{\textbf{Execution Risk vs. Reward.} Strategies in the bottom-left are ideal (High Reward, Low Risk). The "Freeze Tap" occupies a "High Reward" position but carries significant risk if missed. The "Guard Wall" is more "forgiving," making it a viable option for teams struggling with draw weight.}
+    \label{fig:execution_risk}
+\end{figure}
+
+\subsection{Stress Testing}
+To ensure robustness, we simulated scenarios where our execution quality drops. The heatmap below shows how the optimal strategy shifts as our success rate decreases.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/stress_test_matrix.png}
+    \caption{\textbf{Stress Test Matrix.} The stability of the "Freeze Tap" recommendation across different execution levels demonstrates its robustness as a primary strategy.}
+    \label{fig:stress_test}
+\end{figure}
+
+\section{Strategic Recommendations}
+
+Based on our analysis, we propose the following \textbf{Risk Playbook}:
+
+\begin{itemize}
+    \item \textbf{Default Strategy:} The \textbf{Freeze Tap} is statistically superior against most opponents, offering the lowest expected score.
+    \item \textbf{When Leading (Conservative):} If execution is a concern, switch to the \textbf{Guard Wall}. It has a higher expected score but a lower variance, reducing the chance of a disastrous "big end."
+    \item \textbf{When Trailing (Aggressive):} Stick to the \textbf{Freeze Tap} or employ \textbf{Runback Pressure} if the opponent is known to struggle with complex houses. The variance of the Runback can be weaponized to generate steals.
+\end{itemize}
+
+\section{Conclusion}
+The Counter-Strategy Simulator represents a leap forward in curling analytics. By moving from theoretical models to empirical, risk-aware simulations, we provide coaches and athletes with actionable, data-backed insights. Future work will focus on integrating "Shot 2" dynamics and expanding the dataset to include more recent competitions.
+
+\end{document}
