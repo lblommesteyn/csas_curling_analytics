@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -42,36 +42,59 @@ def load_powerplay_ends() -> pd.DataFrame:
     return ends
 
 
-def compute_cluster_distributions(assignment: pd.DataFrame) -> Dict[int, pd.Series]:
+def compute_cluster_distributions(assignment: pd.DataFrame) -> Tuple[Dict[int, pd.Series], List[int]]:
     cluster_distributions: Dict[int, pd.Series] = {}
-    
-    agg_data = assignment.groupby("cluster").agg(
-        avg_score_gain=("avg_score_gain", "mean"),
-        three_plus_rate=("three_plus_rate", "mean"),
-        blank_rate=("blank_rate", "mean"),
-        steal_rate=("steal_rate", "mean")
+
+    ends = pd.read_csv(
+        PROJECT_ROOT / "Ends.csv",
+        usecols=["CompetitionID", "SessionID", "GameID", "EndID", "TeamID", "PowerPlay", "Result"]
     )
+    ends["PowerPlay"] = ends["PowerPlay"].fillna(0)
+    ends["Result"] = ends["Result"].fillna(0).astype(int)
 
-    for cluster_id, stats in agg_data.iterrows():
-        p_steal = stats["steal_rate"]
-        p_blank = stats["blank_rate"]
-        p_three_plus = stats["three_plus_rate"]
-        
-        p_one_or_two = 1.0 - p_steal - p_blank - p_three_plus
-        p_one = p_one_or_two * 0.6
-        p_two = p_one_or_two * 0.4
+    processed_ends = []
+    for _, group in ends.groupby(["CompetitionID", "SessionID", "GameID", "EndID"]):
+        if len(group) != 2:
+            continue
 
-        dist = pd.Series({
-            -1: p_steal,
-            0: p_blank,
-            1: p_one,
-            2: p_two,
-            3: p_three_plus * 0.7,
-            4: p_three_plus * 0.3
-        })
-        cluster_distributions[cluster_id] = dist / dist.sum()
-        
-    return cluster_distributions
+        hammer_rows = group[group["PowerPlay"] > 0]
+        defensive_rows = group[group["PowerPlay"] == 0]
+        if hammer_rows.empty or defensive_rows.empty:
+            continue
+
+        hammer_team_id = hammer_rows["TeamID"].iloc[0]
+        hammer_result = int(hammer_rows["Result"].iloc[0])
+        defensive_result = int(defensive_rows["Result"].iloc[0])
+
+        if hammer_result > 0:
+            signed_result = hammer_result
+        elif defensive_result > 0:
+            signed_result = -defensive_result
+        else:
+            signed_result = 0
+
+        if abs(signed_result) >= 9:
+            continue
+
+        processed_ends.append({"TeamID": hammer_team_id, "SignedResult": signed_result})
+
+    if not processed_ends:
+        return {}, []
+
+    signed_results = pd.DataFrame(processed_ends)
+    merged = signed_results.merge(assignment[["TeamID", "cluster"]], on="TeamID", how="inner")
+    if merged.empty:
+        return {}, []
+
+    score_range = sorted(merged["SignedResult"].unique().astype(int).tolist())
+    full_score_range = list(range(min(score_range), max(score_range) + 1))
+
+    for cluster_id, group in merged.groupby("cluster"):
+        counts = group["SignedResult"].value_counts().reindex(full_score_range, fill_value=0)
+        dist = counts / counts.sum()
+        cluster_distributions[cluster_id] = dist
+
+    return cluster_distributions, full_score_range
 
 
 def evaluate_defenses(
@@ -85,7 +108,7 @@ def evaluate_defenses(
 
     records = []
     for cluster_id, dist in cluster_distributions.items():
-        opponent_distribution = dist.values
+        opponent_distribution = dist.reindex(score_values, fill_value=0).values
         
         # Calculate baseline EV
         baseline_ev = np.dot(opponent_distribution, np.array(score_values))
@@ -205,12 +228,12 @@ def main() -> None:
     model = fit_opponent_clusters(feature_frame)
     assignment = assign_clusters(feature_frame, model)
 
-    cluster_distributions = compute_cluster_distributions(assignment)
+    cluster_distributions, cluster_score_range = compute_cluster_distributions(assignment)
     
     print("Computing empirical priors from historical shots...")
     options, prior_score_range = compute_empirical_priors()
 
-    all_score_values = sorted(list(set(prior_score_range) | set(cluster_distributions[0].index)))
+    all_score_values = sorted(list(set(prior_score_range) | set(cluster_score_range)))
 
     aligned_options = []
     for opt in options:
