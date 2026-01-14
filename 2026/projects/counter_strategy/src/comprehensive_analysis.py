@@ -555,7 +555,7 @@ def compute_risk_metrics_by_strategy() -> pd.DataFrame:
             "CVaR_10": compute_cvar(scores, 0.10),
             "CVaR_20": compute_cvar(scores, 0.20),
             "P_Big_End": (scores >= 3).mean(),
-            "P_Steal": (scores < 0).mean(),
+            "P_Steal": (scores == 0).mean(),  # 0 points = stolen or blanked
             "Max_Score": scores.max(),
             "Median": np.median(scores)
         })
@@ -1123,7 +1123,7 @@ def create_end_to_end_table() -> pd.DataFrame:
                 "EV": scores.mean(),
                 "CVaR_10": compute_cvar(scores, 0.10),
                 "P(>=3)": (scores >= 3).mean() * 100,
-                "P(Steal)": (scores < 0).mean() * 100
+                "P(Steal)": (scores == 0).mean() * 100  # 0 points = stolen or blanked
             })
 
     df = pd.DataFrame(results)
