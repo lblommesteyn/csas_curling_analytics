@@ -20,6 +20,7 @@ from typing import Dict, List, Tuple, Optional
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import matplotlib.colors as mcolors
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -807,9 +808,42 @@ def draw_curling_house(ax, center_x=0, center_y=0, unit_scale=1):
     ax.axhline(center_y, color='black', linewidth=0.5, linestyle='--', alpha=0.5)
 
 
+def estimate_house_reference(task_data: pd.DataFrame) -> Tuple[float, float, float]:
+    """
+    Estimate a stable house reference in sensor units.
+
+    The coordinates are discretized, so we anchor the house at the median X
+    and the modal Y (dominant tee-line band). The 12-foot ring radius is
+    estimated from the spread of the modal band in X.
+    """
+    x = task_data["stone_1_x"].dropna().astype(float)
+    y = task_data["stone_1_y"].dropna().astype(float)
+
+    if x.empty or y.empty:
+        return 0.0, 0.0, 50.0
+
+    center_x = float(x.median())
+    y_mode = y.mode()
+    center_y = float(y_mode.iloc[0]) if not y_mode.empty else float(y.median())
+
+    mode_band = task_data[task_data["stone_1_y"] == center_y]
+    if len(mode_band) >= 5:
+        radius = float(np.percentile(np.abs(mode_band["stone_1_x"] - center_x), 90))
+    else:
+        dist = np.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
+        radius = float(np.percentile(dist, 50)) if len(dist) else 100.0
+
+    if radius < 50:
+        dist = np.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
+        radius = float(np.percentile(dist, 75)) if len(dist) else 50.0
+
+    unit_scale = radius / 6.0 if radius > 0 else 50.0
+    return center_x, center_y, unit_scale
+
+
 def plot_spatial_with_house(task_name: str = "Draw/Guard", task_ids: List[int] = [0, 1, 3]) -> plt.Figure:
     """
-    Create spatial heatmap with curling house overlay.
+    Create spatial frequency map with curling house overlay.
     Uses multiple task IDs if needed to get sufficient data.
     """
     stones = load_csv("stones")
@@ -832,7 +866,15 @@ def plot_spatial_with_house(task_name: str = "Draw/Guard", task_ids: List[int] =
         print(f"No spatial data for {task_name}")
         return None
 
-    # Get coordinates
+    # Get coordinates and filter outliers (4095/0 values are likely invalid/missing)
+    valid_mask = (
+        (task_data["stone_1_x"] > 0) &
+        (task_data["stone_1_y"] > 0) &
+        (task_data["stone_1_x"] < 4000) &
+        (task_data["stone_1_y"] < 4000)
+    )
+    task_data = task_data[valid_mask]
+
     x = task_data["stone_1_x"].dropna()
     y = task_data["stone_1_y"].dropna()
 
@@ -840,59 +882,68 @@ def plot_spatial_with_house(task_name: str = "Draw/Guard", task_ids: List[int] =
         print(f"Only {len(x)} shots for {task_name}, need at least 10")
         return None
 
-    fig, ax = plt.subplots(figsize=(10, 12))
+    fig, ax = plt.subplots(figsize=(10, 10))
 
-    # The data uses a coordinate system where:
-    # - Values range from 0 to ~4095 (12-bit resolution)
-    # - Center of house is approximately at (2048, some y)
-    # - Standard curling sheet is ~4.75m wide
+    counts = (
+        task_data.groupby(["stone_1_x", "stone_1_y"])
+        .size()
+        .reset_index(name="count")
+        .sort_values("count")
+    )
 
-    # Normalize to approximate feet (house is 12ft diameter)
-    # 4096 units ≈ 15 feet across? Let's estimate
-    x_center = 2048  # Assume center line at 2048
-    y_center = y.median()  # Use median y as approximate button location
+    x_center, y_center, unit_scale = estimate_house_reference(task_data)
+    draw_curling_house(ax, x_center, y_center, unit_scale=unit_scale)
 
-    # Scale factor: if 4096 = ~15 feet, then 1 foot = ~273 units
-    scale = 273
+    sizes = 20 + 180 * np.sqrt(counts["count"] / counts["count"].max())
+    cmap = plt.cm.Reds.copy()
+    min_count = int(counts["count"].min())
+    vmin = 2 if min_count <= 1 else min_count
+    if min_count < vmin:
+        cmap.set_under("#c0c0c0")
+    sc = ax.scatter(
+        counts["stone_1_x"],
+        counts["stone_1_y"],
+        s=sizes,
+        c=counts["count"],
+        cmap=cmap,
+        vmin=vmin,
+        alpha=0.85,
+        edgecolor="black",
+        linewidth=0.3,
+        marker="s"
+    )
+    cbar = fig.colorbar(sc, ax=ax, pad=0.01, extend="min" if min_count < vmin else "neither")
+    cbar.set_label("Shot count (grid locations)", fontsize=10)
 
-    # Draw house centered at estimated button
-    draw_curling_house(ax, x_center, y_center, unit_scale=scale)
+    x_min, x_max = x.min(), x.max()
+    y_min, y_max = y.min(), y.max()
+    x_pad = max(20, (x_max - x_min) * 0.1)
+    y_pad = max(20, (y_max - y_min) * 0.1)
+    ax.set_xlim(x_min - x_pad, x_max + x_pad)
+    ax.set_ylim(y_min - y_pad, y_max + y_pad)
 
-    # KDE plot
-    try:
-        sns.kdeplot(x=x, y=y, fill=True, cmap="Reds", alpha=0.6,
-                   levels=10, thresh=0.1, ax=ax)
-    except Exception as e:
-        print(f"KDE failed: {e}")
-        ax.scatter(x, y, alpha=0.5, color='red', s=20)
+    ax.set_xlabel("Lateral position (sensor grid units)", fontsize=12)
+    ax.set_ylabel("Vertical position (sensor grid units)", fontsize=12)
+    ax.set_title(
+        f"Shot Target Grid: {task_name}\n(N={len(x)} shots in Power Play ends)",
+        fontsize=14
+    )
 
-    # Add scatter points
-    ax.scatter(x, y, alpha=0.3, color='darkred', s=10, label='Shot locations')
-
-    # Add reference lines
-    ax.axvline(x_center, color='black', linewidth=1, linestyle='--', alpha=0.5, label='Center line')
-
-    # Set axis limits to focus on house area
-    ax.set_xlim(x_center - 8*scale, x_center + 8*scale)
-    ax.set_ylim(y_center - 10*scale, y_center + 10*scale)
-
-    ax.set_xlabel("Lateral Position (sensor units)\n1 foot ≈ 273 units", fontsize=12)
-    ax.set_ylabel("Vertical Position (sensor units)", fontsize=12)
-    ax.set_title(f"Spatial Precision: {task_name}\n(N={len(x)} shots in Power Play ends)", fontsize=14)
-
-    # Add stats box
-    stats_text = (f"Shot Statistics:\n"
-                  f"─────────────\n"
-                  f"Mean X: {x.mean():.0f}\n"
-                  f"Mean Y: {y.mean():.0f}\n"
-                  f"Std X: {x.std():.0f} (≈{x.std()/scale:.1f} ft)\n"
-                  f"Std Y: {y.std():.0f} (≈{y.std()/scale:.1f} ft)")
-    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=10,
-            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
+    stats_text = "\n".join([
+        "Discrete grid positions",
+        f"N shots: {len(x)}",
+        f"Unique targets: {len(counts)}",
+        f"X mean +/- std: {x.mean():.0f} +/- {x.std():.0f}",
+        f"Y mean +/- std: {y.mean():.0f} +/- {y.std():.0f}",
+        f"X range: [{x_min:.0f}, {x_max:.0f}]",
+        f"Y range: [{y_min:.0f}, {y_max:.0f}]"
+    ])
+    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=9,
+            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.9),
             fontfamily='monospace')
 
     ax.set_aspect('equal')
-    ax.legend(loc='lower right')
+    ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
     return fig
@@ -913,48 +964,109 @@ def plot_spatial_by_quality() -> plt.Figure:
     first_shots = stones.groupby(["CompetitionID", "SessionID", "GameID", "EndID"]).first().reset_index()
     task_data = first_shots.merge(pp_ends, on=["CompetitionID", "SessionID", "GameID", "EndID"])
 
+    # Filter outliers (4095/0 values are likely invalid/missing)
+    valid_mask = (
+        (task_data["stone_1_x"] > 0) &
+        (task_data["stone_1_y"] > 0) &
+        (task_data["stone_1_x"] < 4000) &
+        (task_data["stone_1_y"] < 4000)
+    )
+    task_data = task_data[valid_mask]
+
     # Split by quality
     high_quality = task_data[task_data["Points"] >= 3]
     low_quality = task_data[task_data["Points"] <= 2]
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 8))
+    fig, axes = plt.subplots(1, 2, figsize=(14, 7))
 
-    x_center = 2048
-    scale = 273
+    all_x = task_data["stone_1_x"].dropna()
+    all_y = task_data["stone_1_y"].dropna()
+    x_center, y_center, unit_scale = estimate_house_reference(task_data)
 
-    for ax, data, title, color in [
-        (axes[0], high_quality, "High Quality (Rating 3-4)", "green"),
-        (axes[1], low_quality, "Low Quality (Rating 0-2)", "red")
+    x_min, x_max = all_x.min(), all_x.max()
+    y_min, y_max = all_y.min(), all_y.max()
+    x_pad = max(20, (x_max - x_min) * 0.1)
+    y_pad = max(20, (y_max - y_min) * 0.1)
+
+    counts_high = (
+        high_quality.groupby(["stone_1_x", "stone_1_y"])
+        .size()
+        .reset_index(name="count")
+    )
+    counts_low = (
+        low_quality.groupby(["stone_1_x", "stone_1_y"])
+        .size()
+        .reset_index(name="count")
+    )
+    if len(high_quality) > 0:
+        counts_high["share"] = counts_high["count"] / len(high_quality)
+    else:
+        counts_high["share"] = 0.0
+    if len(low_quality) > 0:
+        counts_low["share"] = counts_low["count"] / len(low_quality)
+    else:
+        counts_low["share"] = 0.0
+
+    max_share = max(
+        counts_high["share"].max() if len(counts_high) > 0 else 0,
+        counts_low["share"].max() if len(counts_low) > 0 else 0
+    )
+    max_share = max(max_share, 1e-6)
+    cmap = plt.cm.viridis
+    norm = mcolors.Normalize(vmin=0, vmax=max_share)
+
+    for ax, data, title, edge_color in [
+        (axes[0], counts_high, "High Quality (Rating 3-4)", "green"),
+        (axes[1], counts_low, "Low Quality (Rating 0-2)", "red")
     ]:
-        x = data["stone_1_x"].dropna()
-        y = data["stone_1_y"].dropna()
-
-        if len(x) < 5:
-            ax.text(0.5, 0.5, "Insufficient data", transform=ax.transAxes, ha='center')
+        if data.empty:
+            ax.text(0.5, 0.5, "Insufficient data", transform=ax.transAxes, ha='center', fontsize=14)
+            ax.set_title(f"{title}\n(N=0)", fontsize=12)
             continue
 
-        y_center = y.median()
-        draw_curling_house(ax, x_center, y_center, unit_scale=scale)
+        draw_curling_house(ax, x_center, y_center, unit_scale=unit_scale)
 
-        try:
-            sns.kdeplot(x=x, y=y, fill=True, cmap="Reds" if color == "red" else "Greens",
-                       alpha=0.6, levels=8, thresh=0.1, ax=ax)
-        except:
-            pass
+        sizes = 20 + 180 * np.sqrt(data["share"] / max_share)
+        ax.scatter(
+            data["stone_1_x"],
+            data["stone_1_y"],
+            s=sizes,
+            c=data["share"],
+            cmap=cmap,
+            norm=norm,
+            alpha=0.85,
+            edgecolor=edge_color,
+            linewidth=0.6,
+            marker="s"
+        )
 
-        ax.scatter(x, y, alpha=0.4, color=color, s=20, edgecolor='black', linewidth=0.5)
-        ax.axvline(x_center, color='black', linewidth=1, linestyle='--', alpha=0.5)
+        ax.set_xlim(x_min - x_pad, x_max + x_pad)
+        ax.set_ylim(y_min - y_pad, y_max + y_pad)
 
-        ax.set_xlim(x_center - 8*scale, x_center + 8*scale)
-        ax.set_ylim(y_center - 10*scale, y_center + 10*scale)
+        stats_text = "\n".join([
+            f"N shots: {int(data['count'].sum())}",
+            f"Unique targets: {len(data)}",
+            f"Top target share: {data['share'].max():.2%}"
+        ])
+        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=9,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
+                fontfamily='monospace')
 
-        ax.set_title(f"{title}\n(N={len(x)})", fontsize=12)
-        ax.set_xlabel("Lateral Position")
-        ax.set_ylabel("Vertical Position")
+        ax.set_title(f"{title}\n(N={int(data['count'].sum())})", fontsize=12)
+        ax.set_xlabel("Lateral position (sensor grid units)")
+        ax.set_ylabel("Vertical position (sensor grid units)")
         ax.set_aspect('equal')
+        ax.grid(True, alpha=0.3)
 
-    fig.suptitle("Shot Placement: High vs Low Execution Quality", fontsize=14, y=1.02)
-    plt.tight_layout()
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    fig.subplots_adjust(right=0.88)
+    cbar_ax = fig.add_axes([0.9, 0.15, 0.02, 0.7])
+    cbar = fig.colorbar(sm, cax=cbar_ax)
+    cbar.set_label("Share of shots (within quality group)", fontsize=10)
+
+    fig.suptitle("Shot Placement: High vs Low Execution Quality", fontsize=14, fontweight='bold')
+    plt.tight_layout(rect=[0, 0, 0.88, 1])
     return fig
 
 
