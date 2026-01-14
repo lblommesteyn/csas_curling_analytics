@@ -42,18 +42,36 @@ def load_powerplay_ends() -> pd.DataFrame:
     return ends
 
 
-def compute_cluster_distributions(ends: pd.DataFrame, assignment: pd.DataFrame) -> Dict[int, pd.Series]:
-    score_values = sorted(ends["Result"].unique())
-    # Ensure range covers typical scores e.g. -2 to 5
-    full_score_range = list(range(min(score_values), max(score_values) + 1))
-    
+def compute_cluster_distributions(assignment: pd.DataFrame) -> Dict[int, pd.Series]:
     cluster_distributions: Dict[int, pd.Series] = {}
-    for cluster_id, group in assignment.groupby("cluster"):
-        members = group["TeamID"].tolist()
-        subset = ends[ends["TeamID"].isin(members)]
-        dist = subset["Result"].value_counts().reindex(full_score_range, fill_value=0)
+    
+    agg_data = assignment.groupby("cluster").agg(
+        avg_score_gain=("avg_score_gain", "mean"),
+        three_plus_rate=("three_plus_rate", "mean"),
+        blank_rate=("blank_rate", "mean"),
+        steal_rate=("steal_rate", "mean")
+    )
+
+    for cluster_id, stats in agg_data.iterrows():
+        p_steal = stats["steal_rate"]
+        p_blank = stats["blank_rate"]
+        p_three_plus = stats["three_plus_rate"]
+        
+        p_one_or_two = 1.0 - p_steal - p_blank - p_three_plus
+        p_one = p_one_or_two * 0.6
+        p_two = p_one_or_two * 0.4
+
+        dist = pd.Series({
+            -1: p_steal,
+            0: p_blank,
+            1: p_one,
+            2: p_two,
+            3: p_three_plus * 0.7,
+            4: p_three_plus * 0.3
+        })
         cluster_distributions[cluster_id] = dist / dist.sum()
-    return cluster_distributions, full_score_range
+        
+    return cluster_distributions
 
 
 def evaluate_defenses(
@@ -180,63 +198,59 @@ from projects.counter_strategy.src.execution_analysis import analyze_execution_s
 def main() -> None:
     print("Loading data and clustering opponents...")
     feature_frame = build_feature_table()
+    if feature_frame.empty:
+        print("No data available for clustering. Exiting.")
+        return
+        
     model = fit_opponent_clusters(feature_frame)
     assignment = assign_clusters(feature_frame, model)
 
-    ends = load_powerplay_ends()
-    cluster_distributions, score_values = compute_cluster_distributions(ends, assignment)
+    cluster_distributions = compute_cluster_distributions(assignment)
     
     print("Computing empirical priors from historical shots...")
-    try:
-        options, prior_score_range = compute_empirical_priors()
-        if not options:
-             print("Insufficient data for empirical priors. Using defaults.")
-             options = get_default_priors(score_values)
-        else:
-             aligned_options = []
-             for opt in options:
-                 prior_series = pd.Series(opt.score_impact, index=prior_score_range)
-                 aligned_series = prior_series.reindex(score_values, fill_value=0)
-                 if aligned_series.sum() > 0:
-                     aligned_series = aligned_series / aligned_series.sum()
-                 
-                 aligned_options.append(
-                     DefenseOption(name=opt.name, success_prob=opt.success_prob, score_impact=aligned_series.values.tolist())
-                 )
-             options = aligned_options
-             
-    except Exception as e:
-        print(f"Error computing empirical priors: {e}. Using defaults.")
-        options = get_default_priors(score_values)
+    options, prior_score_range = compute_empirical_priors()
+
+    all_score_values = sorted(list(set(prior_score_range) | set(cluster_distributions[0].index)))
+
+    aligned_options = []
+    for opt in options:
+        prior_series = pd.Series(opt.score_impact, index=prior_score_range)
+        aligned_series = prior_series.reindex(all_score_values, fill_value=0)
+        if aligned_series.sum() > 0:
+            aligned_series = aligned_series / aligned_series.sum()
+        
+        aligned_options.append(
+            DefenseOption(name=opt.name, success_prob=opt.success_prob, score_impact=aligned_series.values.tolist())
+        )
+    options = aligned_options
+
+    aligned_cluster_dists = {}
+    for cid, dist in cluster_distributions.items():
+        aligned_dist = dist.reindex(all_score_values, fill_value=0)
+        aligned_cluster_dists[cid] = aligned_dist / aligned_dist.sum()
 
     print(f"Evaluated {len(options)} defensive strategies: {[o.name for o in options]}")
     
-    # --- New Visualization ---
     plot_score_distributions(options, OUTPUT_DIR / "score_distributions.png")
-    # -------------------------
     
-    # --- Execution Analysis ---
     print("Running execution sensitivity analysis...")
     exec_stats, exec_profiles, merged_df = analyze_execution_sensitivity()
     if not exec_stats.empty:
         exec_stats.to_csv(OUTPUT_DIR / "execution_sensitivity.csv", index=False)
         generate_all_visualizations(exec_profiles, merged_df, OUTPUT_DIR)
         print("Execution analysis generated (5 visualizations).")
-    # --------------------------
 
-    # Evaluate for different objectives
     objectives = ["expected_value", "minimize_big_end", "maximize_steal"]
     all_results = []
     
     for obj in objectives:
         print(f"Running optimization for objective: {obj}")
-        res = evaluate_defenses(cluster_distributions, score_values, options, objective=obj)
+        res = evaluate_defenses(aligned_cluster_dists, all_score_values, options, objective=obj)
         all_results.append(res)
         
     full_summary = pd.concat(all_results)
     full_summary.to_csv(OUTPUT_DIR / "defense_summary.csv", index=False)
 
-    # Generate Risk Playbook
     risk_playbook = full_summary.pivot(index="cluster", columns="objective", values="recommended_option")
     
     teams = pd.read_csv(PROJECT_ROOT / "Teams.csv")[["CompetitionID", "TeamID", "Name"]]

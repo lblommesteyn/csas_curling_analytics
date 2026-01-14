@@ -28,26 +28,53 @@ FEATURE_COLUMNS = [
 
 
 def build_feature_table(min_usage: int = 8) -> pd.DataFrame:
-    """Aggregate per-team power-play metrics for clustering."""
+    ends = load_csv("ends", usecols=["CompetitionID", "SessionID", "GameID", "EndID", "TeamID", "PowerPlay", "Result"])
+    
+    processed_ends = []
+    for _, group in ends.groupby(["CompetitionID", "SessionID", "GameID", "EndID"]):
+        if len(group) != 2:
+            continue
+        
+        group["PowerPlay"] = group["PowerPlay"].fillna(0)
+        hammer_rows = group[group["PowerPlay"] > 0]
+        defensive_rows = group[group["PowerPlay"] == 0]
 
-    ends = load_csv("ends")
-    ends = ends[ends["PowerPlay"].fillna(0) > 0].copy()
-    ends["Result"] = ends["Result"].fillna(0).astype(int)
+        if hammer_rows.empty or defensive_rows.empty:
+            continue
 
+        hammer_team_id = hammer_rows["TeamID"].iloc[0]
+        hammer_result = hammer_rows["Result"].iloc[0]
+        defensive_result = defensive_rows["Result"].iloc[0]
+        
+        signed_result = 0
+        if hammer_result > 0:
+            signed_result = hammer_result
+        elif defensive_result > 0:
+            signed_result = -defensive_result
+            
+        processed_ends.append({
+            "TeamID": hammer_team_id,
+            "SignedResult": signed_result
+        })
+
+    if not processed_ends:
+        return pd.DataFrame(columns=FEATURE_COLUMNS + ["TeamID", "usage_count"])
+
+    hammer_results = pd.DataFrame(processed_ends)
+    
     feature_frame = (
-        ends.groupby("TeamID")
+        hammer_results.groupby("TeamID")
         .agg(
-            avg_score_gain=("Result", "mean"),
-            usage_count=("EndID", "count"),
-            three_plus_rate=("Result", lambda x: np.mean(np.array(x) >= 3)),
-            blank_rate=("Result", lambda x: np.mean(np.array(x) == 0)),
-            steal_rate=("Result", lambda x: np.mean(np.array(x) < 0)),
+            avg_score_gain=("SignedResult", "mean"),
+            usage_count=("SignedResult", "count"),
+            three_plus_rate=("SignedResult", lambda x: np.mean(np.array(x) >= 3)),
+            blank_rate=("SignedResult", lambda x: np.mean(np.array(x) == 0)),
+            steal_rate=("SignedResult", lambda x: np.mean(np.array(x) < 0)),
         )
         .reset_index()
     )
 
-    feature_frame = feature_frame[feature_frame["usage_count"] >= min_usage].reset_index(drop=True)
-    return feature_frame
+    return feature_frame[feature_frame["usage_count"] >= min_usage].reset_index(drop=True)
 
 
 def fit_opponent_clusters(feature_frame: pd.DataFrame, n_clusters: int = 3) -> GaussianMixture:

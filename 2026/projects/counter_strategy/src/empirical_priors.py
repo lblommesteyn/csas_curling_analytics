@@ -38,78 +38,102 @@ TASK_MAP = {
 }
 
 
-def compute_empirical_priors(min_samples: int = 10) -> List[DefenseOption]:
-    """
-    Calculate success rates and score distributions from historical data.
-    
-    Returns a list of DefenseOption objects populated with real-world data.
-    If data is insufficient for a strategy, falls back to hardcoded defaults.
-    """
-    
-    # 1. Load Data
-    ends = load_csv("ends", usecols=["CompetitionID", "SessionID", "GameID", "EndID", "PowerPlay", "Result"])
+def compute_empirical_priors(min_samples: int = 10) -> Tuple[List[DefenseOption], List[int]]:
+    ends = load_csv("ends", usecols=["CompetitionID", "SessionID", "GameID", "EndID", "TeamID", "PowerPlay", "Result"])
     stones = load_csv("stones", usecols=["CompetitionID", "SessionID", "GameID", "EndID", "ShotID", "Task"])
-    
-    # 2. Filter for Power Play Ends
-    pp_ends = ends[ends["PowerPlay"].fillna(0) > 0].copy()
-    
-    # 3. Join with Stones to get the first shot of the end
-    # We select the stone with the minimum ShotID for each end.
+
+    processed_ends = []
+    for key, group in ends.groupby(["CompetitionID", "SessionID", "GameID", "EndID"]):
+        if len(group) != 2:
+            continue
+        
+        group["PowerPlay"] = group["PowerPlay"].fillna(0)
+        hammer_rows = group[group["PowerPlay"] > 0]
+        defensive_rows = group[group["PowerPlay"] == 0]
+
+        if hammer_rows.empty or defensive_rows.empty:
+            continue
+
+        hammer_result = hammer_rows["Result"].iloc[0]
+        defensive_result = defensive_rows["Result"].iloc[0]
+        
+        signed_result = 0
+        if hammer_result > 0:
+            signed_result = hammer_result
+        elif defensive_result > 0:
+            signed_result = -defensive_result
+        
+        processed_ends.append(list(key) + [signed_result])
+
+    if not processed_ends:
+        return [], []
+
+    end_outcomes = pd.DataFrame(processed_ends, columns=["CompetitionID", "SessionID", "GameID", "EndID", "SignedResult"])
+
     stones["ShotID"] = pd.to_numeric(stones["ShotID"], errors="coerce")
     first_shots = stones.sort_values("ShotID").groupby(["CompetitionID", "SessionID", "GameID", "EndID"]).head(1).copy()
     
-    merged = pp_ends.merge(
+    merged = end_outcomes.merge(
         first_shots[["CompetitionID", "SessionID", "GameID", "EndID", "Task"]],
         on=["CompetitionID", "SessionID", "GameID", "EndID"],
         how="inner"
     )
     
-    # 4. Map Tasks to Strategies
     merged["Strategy"] = merged["Task"].map(TASK_MAP)
     merged = merged.dropna(subset=["Strategy"])
     
-    # 5. Calculate Stats per Strategy
     options = []
-    score_range = sorted(pp_ends["Result"].unique().astype(int))
-    # Ensure range covers typical scores e.g. -2 to 5
+    all_strategies = set(TASK_MAP.values())
+    
+    if merged.empty:
+        score_range = list(range(-2, 6))
+    else:
+        score_range = sorted(merged["SignedResult"].unique().astype(int))
+    
     full_score_range = list(range(min(score_range), max(score_range) + 1))
     
-    for strategy, group in merged.groupby("Strategy"):
-        n_samples = len(group)
-        if n_samples < min_samples:
+    strategy_groups = merged.groupby("Strategy")
+    
+    for strategy in all_strategies:
+        if strategy not in strategy_groups.groups or len(strategy_groups.get_group(strategy)) < min_samples:
+            default_option = get_default_priors(strategy, full_score_range)
+            options.append(default_option)
             continue
             
-        # Calculate score distribution (probability of each score)
-        counts = group["Result"].value_counts().reindex(full_score_range, fill_value=0)
-        probs = counts / n_samples
-        
-        # Calculate "Success Probability"
-        # We define "Success" loosely as "Preventing a big score (>=2)" 
-        # This is a simplification for the optimizer's interface, 
-        # but the real power comes from the score_impact distribution.
-        # For the optimizer, we set success_prob = 1.0 and encode the full distribution 
-        # into the score_impact vector. This allows the optimizer to use the 
-        # exact empirical distribution rather than a binary success/fail model.
+        group = strategy_groups.get_group(strategy)
+        counts = group["SignedResult"].value_counts().reindex(full_score_range, fill_value=0)
+        probs = counts / counts.sum()
         
         options.append(
             DefenseOption(
                 name=strategy,
-                success_prob=1.0, # Use full distribution in score_impact
-                score_impact=probs.values.tolist() # This is now a probability distribution, not a single outcome
+                success_prob=1.0,
+                score_impact=probs.values.tolist()
             )
         )
         
     return options, full_score_range
 
-def get_default_priors(score_values: List[int]) -> List[DefenseOption]:
-    """Fallback to hardcoded priors if data is missing."""
-    # Replicates the logic from original run_analysis.py
-    guard_impact = [max(val - 1, -1) if val >= 3 else val for val in score_values]
-    freeze_impact = [val - 1 if val >= 2 else val for val in score_values]
-    runback_impact = [val - 0.5 if val <= 0 else val + 0.3 for val in score_values]
+def get_default_priors(strategy_name: str, score_values: List[int]) -> DefenseOption:
+    base_dist = np.zeros(len(score_values))
+    score_map = {score: i for i, score in enumerate(score_values)}
 
-    return [
-        DefenseOption(name="Guard Wall", success_prob=0.75, score_impact=guard_impact),
-        DefenseOption(name="Freeze Tap", success_prob=0.65, score_impact=freeze_impact),
-        DefenseOption(name="Runback Pressure", success_prob=0.55, score_impact=runback_impact),
-    ]
+    if strategy_name == "Guard Wall":
+        priors = {0: 0.4, 1: 0.3, 2: 0.2, -1: 0.1}
+    elif strategy_name == "Freeze Tap":
+        priors = {0: 0.5, 1: 0.2, 2: 0.1, -1: 0.2}
+    elif strategy_name == "Runback Pressure":
+        priors = {0: 0.2, 1: 0.2, 2: 0.2, 3: 0.1, -1: 0.2, -2: 0.1}
+    else:
+        priors = {0: 0.6, 1: 0.25, -1: 0.15}
+
+    for score, prob in priors.items():
+        if score in score_map:
+            base_dist[score_map[score]] = prob
+    
+    if base_dist.sum() > 0:
+        base_dist = base_dist / base_dist.sum()
+    else:
+        base_dist[score_map.get(0, 0)] = 1.0
+
+    return DefenseOption(name=strategy_name, success_prob=1.0, score_impact=base_dist.tolist())
