@@ -178,8 +178,8 @@ Table \ref{tab:risk} shows our computed risk metrics for each strategy.
 \toprule
 Strategy & N & EV & Std Dev & CVaR$_{10\%}$ & P($\geq$3) & P(Steal) \\
 \midrule
-Guard Wall & 203 & 1.53 & 1.12 & 3.24 & 20.2\% & 0.0\% \\
-Draw/Guard & 389 & 1.70 & 1.71 & 4.08 & 21.6\% & 0.0\% \\
+Guard Wall & 203 & 1.53 & 1.12 & 3.24 & 20.2\% & 19.2\% \\
+Draw/Guard & 389 & 1.70 & 1.71 & 4.08 & 21.6\% & 20.6\% \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -317,14 +317,14 @@ Table \ref{tab:e2e} provides a comprehensive view of strategy performance across
 \toprule
 End & Strategy & N & EV & CVaR$_{10\%}$ & P($\geq$3) & P(Steal) & Profile \\
 \midrule
-5 & Draw/Guard & 41 & 1.46 & 3.00 & 22.0\% & 0\% & Standard \\
-5 & Guard Wall & 36 & 1.61 & 3.20 & 27.8\% & 0\% & Standard \\
-6 & Draw/Guard & 123 & 1.62 & 3.38 & 23.6\% & 0\% & Standard \\
-6 & Guard Wall & 81 & 1.38 & 3.15 & 16.0\% & 0\% & Standard \\
-7 & Draw/Guard & 151 & 1.63 & 3.44 & 21.2\% & 0\% & Standard \\
-7 & Guard Wall & 54 & 1.74 & 3.55 & 20.4\% & 0\% & Standard \\
-8 & Draw/Guard & 53 & 2.66 & 9.00 & 26.4\% & 0\% & Standard \\
-8 & Guard Wall & 11 & 1.91 & 3.00 & 36.4\% & 0\% & Standard \\
+5 & Draw/Guard & 41 & 1.46 & 3.00 & 22.0\% & 22.0\% & Standard \\
+5 & Guard Wall & 36 & 1.61 & 3.20 & 27.8\% & 19.4\% & Standard \\
+6 & Draw/Guard & 123 & 1.62 & 3.38 & 23.6\% & 18.7\% & Standard \\
+6 & Guard Wall & 81 & 1.38 & 3.15 & 16.0\% & 23.5\% & Standard \\
+7 & Draw/Guard & 151 & 1.63 & 3.44 & 21.2\% & 19.2\% & Standard \\
+7 & Guard Wall & 54 & 1.74 & 3.55 & 20.4\% & 14.8\% & Standard \\
+8 & Draw/Guard & 53 & 2.66 & 9.00 & 26.4\% & 26.4\% & Standard \\
+8 & Guard Wall & 11 & 1.91 & 3.00 & 36.4\% & 0.0\% & Standard \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -349,7 +349,7 @@ Based on our models, here are the 5 Golden Rules for Mixed Doubles Defense:
     \item \textbf{Chasing the Game (Down 2+, End 5-8):}
     \begin{itemize}
         \item \textbf{Profile:} Aggressive (maximize steal probability).
-        \item \textbf{Call:} Neither strategy in our data shows significant steal probability. Consider higher-variance plays not in our dataset (e.g., Runback) or accept the need to force with Hammer.
+        \item \textbf{Call:} Draw/Guard shows slightly higher P(Steal) at 20.6\%. Consider higher-variance plays or accept forcing with Hammer next end.
     \end{itemize}
 
     \item \textbf{Power Play Timing:}
@@ -375,14 +375,14 @@ Based on our models, here are the 5 Golden Rules for Mixed Doubles Defense:
 \toprule
 End & $\Delta$ & Hammer & Profile & Call & EV & P($\geq$3) & P(Steal) \\
 \midrule
-6 & -2 & Opp & Aggressive & Draw/Guard & 1.70 & 21.6\% & 0\% \\
-6 & 0 & Opp & Standard & Guard Wall & 1.53 & 20.2\% & 0\% \\
-6 & +2 & Opp & Conservative & Guard Wall & 1.53 & 20.2\% & 0\% \\
-7 & -1 & Us & Aggressive & Draw/Guard & 1.70 & 21.6\% & 0\% \\
-7 & +1 & Us & Standard & Guard Wall & 1.53 & 20.2\% & 0\% \\
-8 & -2 & Opp & Aggressive & Draw/Guard & 1.70 & 21.6\% & 0\% \\
-8 & 0 & Opp & Standard & Guard Wall & 1.53 & 20.2\% & 0\% \\
-8 & +2 & Us & Conservative & Guard Wall & 1.53 & 20.2\% & 0\% \\
+6 & -2 & Opp & Aggressive & Draw/Guard & 1.70 & 21.6\% & 20.6\% \\
+6 & 0 & Opp & Standard & Guard Wall & 1.53 & 20.2\% & 19.2\% \\
+6 & +2 & Opp & Conservative & Guard Wall & 1.53 & 20.2\% & 19.2\% \\
+7 & -1 & Us & Aggressive & Draw/Guard & 1.70 & 21.6\% & 20.6\% \\
+7 & +1 & Us & Standard & Guard Wall & 1.53 & 20.2\% & 19.2\% \\
+8 & -2 & Opp & Aggressive & Draw/Guard & 1.70 & 21.6\% & 20.6\% \\
+8 & 0 & Opp & Standard & Guard Wall & 1.53 & 20.2\% & 19.2\% \\
+8 & +2 & Us & Conservative & Guard Wall & 1.53 & 20.2\% & 19.2\% \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -393,7 +393,7 @@ While our simulator provides robust insights, several limitations should be note
 
 \begin{enumerate}
     \item \textbf{Data Scope:} Our data is drawn exclusively from elite competitions; execution rates for club-level players will differ significantly.
-    \item \textbf{Steal Probability:} Our dataset shows 0\% steal probability for both main strategies, limiting our ability to recommend aggressive play. This may reflect elite-level defensive competence or data collection bias.
+    \item \textbf{Steal Definition:} We define P(Steal) as the probability the Power Play team scores 0 points (including blanks). This is an upper bound on true steals, as blanks are strategically different from opponent scores.
     \item \textbf{Cluster Homogeneity:} BIC suggests $K=1$ is optimal, indicating elite teams are more homogeneous than expected. Our $K=3$ clustering provides tactical value but should be interpreted with caution.
     \item \textbf{Execution Ratings:} The ``Points'' field (0-4) is subjectively assigned by scorers and may vary between events.
 \end{enumerate}
