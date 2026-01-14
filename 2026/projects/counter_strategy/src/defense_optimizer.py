@@ -114,7 +114,8 @@ def minimax_defense(
                 best_option = option
                 
         elif objective == "maximize_steal":
-            # Maximize probability of Score < 0
+            if np.min(score_values) >= 0:
+                raise ValueError("Cannot maximize steal probability with no negative score values provided.")
             steal_indices = [i for i, s in enumerate(score_values) if s < 0]
             prob_steal = np.sum(final_dist[steal_indices])
             if prob_steal > best_value:

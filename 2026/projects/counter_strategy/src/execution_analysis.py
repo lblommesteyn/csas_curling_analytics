@@ -46,36 +46,20 @@ def analyze_execution_sensitivity(min_samples: int = 1) -> Tuple[pd.DataFrame, L
     
     # 2. Filter for Power Play Ends
     pp_ends = ends[ends["PowerPlay"].fillna(0) > 0].copy()
-    print(f"DEBUG: Power Play Ends: {len(pp_ends)}")
     
     # 3. Join with Stones to get Shot 1 (Defensive Shot)
     stones["ShotID"] = pd.to_numeric(stones["ShotID"], errors="coerce")
     first_shots = stones.sort_values("ShotID").groupby(["CompetitionID", "SessionID", "GameID", "EndID"]).head(1).copy()
-    print(f"DEBUG: First Shots (Min ShotID): {len(first_shots)}")
-    
-    print("DEBUG: Ends Keys Dtypes:")
-    print(pp_ends[["CompetitionID", "SessionID", "GameID", "EndID"]].dtypes)
-    print("DEBUG: Stones Keys Dtypes:")
-    print(first_shots[["CompetitionID", "SessionID", "GameID", "EndID"]].dtypes)
-    
-    print("DEBUG: Ends Keys Head:")
-    print(pp_ends[["CompetitionID", "SessionID", "GameID", "EndID"]].head())
-    print("DEBUG: Stones Keys Head:")
-    print(first_shots[["CompetitionID", "SessionID", "GameID", "EndID"]].head())
     
     merged = pp_ends.merge(
         first_shots[["CompetitionID", "SessionID", "GameID", "EndID", "Task", "Points"]],
         on=["CompetitionID", "SessionID", "GameID", "EndID"],
         how="inner"
     )
-    print(f"DEBUG: Merged Data: {len(merged)}")
     
     # 4. Map Tasks to Strategies
     merged["Strategy"] = merged["Task"].map(TASK_MAP)
     merged = merged.dropna(subset=["Strategy", "Points"])
-    print(f"DEBUG: Data after mapping and dropna: {len(merged)}")
-    if not merged.empty:
-        print(f"DEBUG: Points distribution: {merged['Points'].value_counts()}")
     
     # 5. Define Quality Buckets
     # High Quality: 3 or 4 (Made shot)

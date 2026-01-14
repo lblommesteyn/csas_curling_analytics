@@ -1,0 +1,9 @@
+End,Score_Diff,Hammer,Profile,Call,EV,P(>=3),P(Steal)
+6,-2,Opp,Aggressive,Takeout,0.500,0.100,0.300
+6,0,Opp,Standard,Freeze Tap,0.200,0.000,0.200
+6,2,Opp,Conservative,Freeze Tap,0.200,0.000,0.200
+7,-1,Us,Aggressive,Takeout,0.500,0.100,0.300
+7,1,Us,Standard,Freeze Tap,0.200,0.000,0.200
+8,-2,Opp,Aggressive,Takeout,0.500,0.100,0.300
+8,0,Opp,Standard,Freeze Tap,0.200,0.000,0.200
+8,2,Us,Conservative,Freeze Tap,0.200,0.000,0.200
