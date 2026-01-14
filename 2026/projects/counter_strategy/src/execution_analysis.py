@@ -122,10 +122,110 @@ def analyze_execution_sensitivity(min_samples: int = 1) -> Tuple[pd.DataFrame, L
             "N_Low": len(low_group)
         })
         
-    return pd.DataFrame(stats_records), profiles
+    return pd.DataFrame(stats_records), profiles, merged
 
-def plot_execution_risk(profiles: List[ExecutionProfile], output_path: Path) -> None:
-    """Generate a scatter plot of Potential vs Risk."""
+def plot_slope_chart(profiles: List[ExecutionProfile], output_path: Path) -> None:
+    """
+    Generate a Slope Chart (Dumbbell Plot) showing the drop-off from Good to Bad execution.
+    """
+    if not profiles:
+        return
+
+    data = []
+    for p in profiles:
+        data.append({
+            "Strategy": p.strategy,
+            "Good Shot": p.high_quality_ev,
+            "Bad Shot": p.low_quality_ev,
+            "Cost": p.forgiveness
+        })
+    
+    df = pd.DataFrame(data).sort_values("Good Shot")
+    
+    plt.figure(figsize=(10, 6))
+    
+    # Draw lines
+    for i, row in df.iterrows():
+        plt.plot([row["Good Shot"], row["Bad Shot"]], [row["Strategy"], row["Strategy"]], 
+                 color="gray", alpha=0.5, zorder=1)
+        
+    # Draw points
+    plt.scatter(df["Good Shot"], df["Strategy"], color="green", s=100, label="Good Shot (3-4)", zorder=2)
+    plt.scatter(df["Bad Shot"], df["Strategy"], color="red", s=100, label="Bad Shot (0-2)", zorder=2)
+    
+    plt.title("The Cost of a Miss: Execution Sensitivity")
+    plt.xlabel("Expected Opponent Score (Lower is Better)")
+    plt.legend()
+    plt.grid(True, axis="x", linestyle="--", alpha=0.5)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300)
+    plt.close()
+
+def plot_diverging_bars(profiles: List[ExecutionProfile], output_path: Path) -> None:
+    """
+    Generate a Diverging Bar Chart showing Risk vs Reward relative to average.
+    """
+    if not profiles:
+        return
+        
+    data = []
+    for p in profiles:
+        avg_ev = (p.high_quality_ev + p.low_quality_ev) / 2
+        data.append({
+            "Strategy": p.strategy,
+            "Reward": p.high_quality_ev - avg_ev, # Negative because lower score is better
+            "Risk": p.low_quality_ev - avg_ev
+        })
+    
+    df = pd.DataFrame(data).sort_values("Reward")
+    
+    plt.figure(figsize=(10, 6))
+    
+    # Since lower score is better, "Reward" is reducing the score (negative change)
+    # "Risk" is increasing the score (positive change)
+    
+    # We want "Reward" (Green) to go Left, "Risk" (Red) to go Right
+    # But currently Reward is negative (good) and Risk is positive (bad).
+    # So a standard barh will work perfectly if 0 is center.
+    
+    plt.barh(df["Strategy"], df["Reward"], color="green", alpha=0.7, label="Benefit of Good Shot")
+    plt.barh(df["Strategy"], df["Risk"], color="red", alpha=0.7, label="Penalty of Bad Shot")
+    
+    plt.axvline(0, color="black", linewidth=0.8)
+    plt.title("Risk/Reward Trade-off (Relative to Average)")
+    plt.xlabel("Change in Expected Score")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300)
+    plt.close()
+
+def plot_degradation_heatmap(merged_df: pd.DataFrame, output_path: Path) -> None:
+    """
+    Generate a Heatmap showing Expected Score by Strategy and specific Shot Points (0-4).
+    """
+    if merged_df.empty:
+        return
+        
+    # Calculate Mean Result by Strategy and Points
+    pivot = merged_df.groupby(["Strategy", "Points"])["Result"].mean().unstack()
+    
+    # Sort by best result at Points=4
+    if 4 in pivot.columns:
+        pivot = pivot.sort_values(4)
+        
+    plt.figure(figsize=(10, 6))
+    sns.heatmap(pivot, annot=True, fmt=".2f", cmap="RdYlGn_r", cbar_kws={'label': 'Avg Opponent Score'})
+    plt.title("Performance Degradation by Execution Quality")
+    plt.xlabel("Shot Execution Rating (0-4)")
+    plt.ylabel("Strategy")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300)
+    plt.close()
+
+def plot_forgiveness_quadrant(profiles: List[ExecutionProfile], output_path: Path) -> None:
+    """
+    Generate a Quadrant Plot: Max Reward vs Forgiveness.
+    """
     if not profiles:
         return
         
@@ -133,42 +233,52 @@ def plot_execution_risk(profiles: List[ExecutionProfile], output_path: Path) -> 
     for p in profiles:
         data.append({
             "Strategy": p.strategy,
-            "Max Potential (High Quality EV)": p.high_quality_ev,
-            "Risk of Ruin (Low Quality EV)": p.low_quality_ev,
-            "Size": p.sample_size_high + p.sample_size_low
+            "Max Reward": -p.high_quality_ev, # Negate so higher is better
+            "Forgiveness": 1 / (p.forgiveness + 0.01) # Inverse of cost
         })
         
     df = pd.DataFrame(data)
     
-    plt.figure(figsize=(8, 6))
-    sns.scatterplot(
-        data=df,
-        x="Max Potential (High Quality EV)",
-        y="Risk of Ruin (Low Quality EV)",
-        hue="Strategy",
-        style="Strategy",
-        s=200,
-        palette="deep"
-    )
+    plt.figure(figsize=(8, 8))
+    sns.scatterplot(data=df, x="Max Reward", y="Forgiveness", s=200, hue="Strategy", style="Strategy")
     
-    # Add diagonal line (where High EV == Low EV, impossible usually)
-    # But more useful: Add a reference for "Safe" vs "Risky"
-    # Lower X and Lower Y is best.
+    # Add quadrant lines
+    plt.axvline(df["Max Reward"].mean(), color="gray", linestyle="--")
+    plt.axhline(df["Forgiveness"].mean(), color="gray", linestyle="--")
     
-    plt.title("Execution Sensitivity: Reward vs. Risk")
-    plt.xlabel("Expected Opponent Score (Good Shot)")
-    plt.ylabel("Expected Opponent Score (Bad Shot)")
+    plt.title("Strategic Quadrants: Reward vs. Forgiveness")
+    plt.xlabel("Max Reward (Negative Expected Score)")
+    plt.ylabel("Forgiveness (Inverse of Miss Cost)")
     
-    # Annotate points
     for i, row in df.iterrows():
-        plt.text(
-            row["Max Potential (High Quality EV)"] + 0.02, 
-            row["Risk of Ruin (Low Quality EV)"], 
-            row["Strategy"],
-            fontsize=9
-        )
+        plt.text(row["Max Reward"]+0.01, row["Forgiveness"], row["Strategy"], fontsize=9)
         
-    plt.grid(True, linestyle="--", alpha=0.6)
     plt.tight_layout()
     plt.savefig(output_path, dpi=300)
     plt.close()
+
+def plot_confidence_bands(merged_df: pd.DataFrame, output_path: Path) -> None:
+    """
+    Generate a Line Plot with Confidence Bands showing score trend by rating.
+    """
+    if merged_df.empty:
+        return
+        
+    plt.figure(figsize=(10, 6))
+    sns.lineplot(data=merged_df, x="Points", y="Result", hue="Strategy", style="Strategy", markers=True, dashes=False)
+    
+    plt.title("Execution Consistency Profile")
+    plt.xlabel("Shot Execution Rating (0-4)")
+    plt.ylabel("Average Opponent Score")
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300)
+    plt.close()
+
+def generate_all_visualizations(profiles: List[ExecutionProfile], merged_df: pd.DataFrame, output_dir: Path) -> None:
+    """Wrapper to generate all 5 visualizations."""
+    plot_slope_chart(profiles, output_dir / "viz_slope_chart.png")
+    plot_diverging_bars(profiles, output_dir / "viz_diverging_bars.png")
+    plot_degradation_heatmap(merged_df, output_dir / "viz_heatmap.png")
+    plot_forgiveness_quadrant(profiles, output_dir / "viz_quadrant.png")
+    plot_confidence_bands(merged_df, output_dir / "viz_confidence_bands.png")

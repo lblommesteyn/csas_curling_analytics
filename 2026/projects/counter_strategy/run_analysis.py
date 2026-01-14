@@ -175,7 +175,7 @@ def plot_score_distributions(options: List[DefenseOption], output_path: Path) ->
     plt.savefig(output_path, dpi=300, facecolor='white', transparent=False)
     plt.close()
 
-from projects.counter_strategy.src.execution_analysis import analyze_execution_sensitivity, plot_execution_risk
+from projects.counter_strategy.src.execution_analysis import analyze_execution_sensitivity, generate_all_visualizations
 
 def main() -> None:
     print("Loading data and clustering opponents...")
@@ -217,11 +217,11 @@ def main() -> None:
     
     # --- Execution Analysis ---
     print("Running execution sensitivity analysis...")
-    exec_stats, exec_profiles = analyze_execution_sensitivity()
+    exec_stats, exec_profiles, merged_df = analyze_execution_sensitivity()
     if not exec_stats.empty:
         exec_stats.to_csv(OUTPUT_DIR / "execution_sensitivity.csv", index=False)
-        plot_execution_risk(exec_profiles, OUTPUT_DIR / "execution_risk_scatter.png")
-        print("Execution analysis generated.")
+        generate_all_visualizations(exec_profiles, merged_df, OUTPUT_DIR)
+        print("Execution analysis generated (5 visualizations).")
     # --------------------------
 
     # Evaluate for different objectives

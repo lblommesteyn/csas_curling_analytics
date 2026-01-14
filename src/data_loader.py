@@ -28,6 +28,7 @@ def load_csv(
     *,
     dtype: Optional[Mapping[str, Any]] = None,
     parse_dates: Optional[list[str]] = None,
+    **kwargs: Any,
 ) -> pd.DataFrame:
     """
     Read one of the challenge CSV files into a DataFrame.
@@ -40,13 +41,15 @@ def load_csv(
         Optional dtype overrides passed to pandas.
     parse_dates:
         Column names that should be parsed as dates.
+    **kwargs:
+        Additional arguments passed to pd.read_csv.
     """
 
     if key not in DATA_FILES:
         raise KeyError(f"Unknown dataset '{key}'. Expected one of {sorted(DATA_FILES)}.")
 
     csv_path = REPO_ROOT / DATA_FILES[key]
-    return pd.read_csv(csv_path, dtype=dtype, parse_dates=parse_dates)
+    return pd.read_csv(csv_path, dtype=dtype, parse_dates=parse_dates, **kwargs)
 
 
 def load_all() -> dict[str, pd.DataFrame]:
