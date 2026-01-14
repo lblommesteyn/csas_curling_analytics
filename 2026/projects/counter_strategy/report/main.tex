@@ -28,7 +28,7 @@
 \maketitle
 
 \begin{abstract}
-\noindent This report presents the development, methodology, and strategic implications of the \textbf{Counter-Strategy Simulator}, an advanced analytics engine designed to optimize defensive decision-making in Mixed Doubles Curling. The introduction of the ``Power Play'' in Mixed Doubles has fundamentally altered the strategic landscape, creating high-leverage situations where traditional heuristics often fail. By leveraging a dataset of over \textbf{26,000 elite-level shots} across \textbf{598 Power Play ends}, we construct a rigorous probabilistic framework for defensive play. Our system integrates \textbf{Gaussian Mixture Models (GMM)} to profile opponent tendencies, \textbf{Kernel Density Estimation (KDE)} to map spatial precision, a \textbf{Random Forest classifier} to predict opponent responses, and a \textbf{Risk-Aware Optimizer} using Conditional Value at Risk (CVaR) to tailor decisions to game state. We demonstrate that the ``Guard Wall'' strategy provides superior risk-adjusted performance across most scenarios, with our execution sensitivity analysis showing it has a forgiveness gap of only 0.03 points compared to 0.21 for alternative strategies. Our ``Coach-Ready'' playbook provides specific, actionable guidelines backed by stratified statistical analysis that controls for selection bias in Power Play timing decisions.
+\noindent This report presents the development, methodology, and strategic implications of the \textbf{Counter-Strategy Simulator}, an advanced analytics engine designed to optimize defensive decision-making in Mixed Doubles Curling. The introduction of the ``Power Play'' in Mixed Doubles has fundamentally altered the strategic landscape, creating high-leverage situations where traditional heuristics often fail. By leveraging a dataset of over \textbf{26,000 elite-level shots} across \textbf{598 Power Play ends}, we construct a rigorous probabilistic framework for defensive play. Our system integrates \textbf{Gaussian Mixture Models (GMM)} to profile opponent tendencies, \textbf{discrete spatial target maps} to characterize placement precision, a \textbf{Random Forest classifier} to predict opponent responses, and a \textbf{Risk-Aware Optimizer} using Conditional Value at Risk (CVaR) to tailor decisions to game state. We demonstrate that the ``Guard Wall'' strategy provides superior risk-adjusted performance across most scenarios, with our execution sensitivity analysis showing it has a forgiveness gap of only 0.03 points compared to 0.21 for alternative strategies. Our ``Coach-Ready'' playbook provides specific, actionable guidelines backed by stratified statistical analysis that controls for selection bias in Power Play timing decisions.
 \end{abstract}
 
 \section{Introduction}
@@ -51,7 +51,7 @@ To answer these questions, we developed the \textbf{Counter-Strategy Simulator}.
 Our research synthesizes methodologies from three distinct domains of sports analytics: Spatial Analysis, Win Probability Modeling, and Game Theory.
 
 \subsection{Spatial Analytics: The ``CourtVision'' of Curling}
-In 2012, Kirk Goldsberry revolutionized basketball analytics with ``CourtVision'' \cite{goldsberry2012}, a framework that mapped NBA shooting efficiency to specific spatial coordinates on the court. He demonstrated that a player's value was not just their shooting percentage, but the spatial distribution of their successful shots. We apply this same logic to curling. Traditional stats track ``Shooting Percentage'' (e.g., 85\%), but they fail to distinguish between a shot that lands on the button and one that lands on the tee-line. Using \textbf{Kernel Density Estimation (KDE)}, we construct ``Heatmaps of Success'' for key defensive shots, identifying the precise ``landing zones'' required to neutralize a Power Play.
+In 2012, Kirk Goldsberry revolutionized basketball analytics with ``CourtVision'' \cite{goldsberry2012}, a framework that mapped NBA shooting efficiency to specific spatial coordinates on the court. He demonstrated that a player's value was not just their shooting percentage, but the spatial distribution of their successful shots. We apply this same logic to curling. Traditional stats track ``Shooting Percentage'' (e.g., 85\%), but they fail to distinguish between a shot that lands on the button and one that lands on the tee-line. Using \textbf{grid-based location frequency maps} (the event system stores coordinates on a discrete sensor grid), we construct ``Target Maps of Success'' for key defensive shots, identifying the placement zones required to neutralize a Power Play.
 
 \subsection{Expected Value and Win Probability}
 The concept of ``Expected Goals'' (xG) in soccer \cite{green2012} allows analysts to quantify the quality of a scoring chance, independent of the outcome. Similarly, our ``Empirical Priors'' module assigns an ``Expected Score'' to every defensive decision. However, maximizing Expected Score is not always the goal. In the NFL, Lock and Nettleton \cite{lock2014} demonstrated that teams should maximize \textbf{Win Probability Added (WPA)}, not just points. We adopt this framework, using Monte Carlo simulation to value the ``Hammer'' and score differential. This allows our agent to make ``suboptimal'' point-expectancy plays if they increase the probability of winning the match (e.g., gambling for a steal when down by 2).
@@ -65,11 +65,11 @@ The core of our analysis is the \texttt{Stones.csv} dataset, a comprehensive rec
 \begin{itemize}
     \item \textbf{Game State:} The End Number (1-8), Score Differential, and Hammer Possession.
     \item \textbf{Shot Metadata:} The ``Task ID'' (intended shot type) and ``Turn'' (handle).
-    \item \textbf{Execution Metrics:} A subjective ``Success Rating'' (0-4) and the precise final coordinates ($x, y$) of the stone in sensor units (approximately 273 units per foot).
+    \item \textbf{Execution Metrics:} A subjective ``Success Rating'' (0-4) and the final coordinates ($x, y$) of the stone on a discrete sensor grid. We treat these coordinates as categorical target points for spatial analysis.
     \item \textbf{Outcomes:} The final score of the end, which serves as our ``ground truth'' label for strategic success.
 \end{itemize}
 
-Data preprocessing involved normalizing coordinate systems across different events, imputing missing shot types using spatial clustering, and aggregating shot-level data into end-level ``Performance Vectors'' for opponent profiling. Teams with fewer than 8 Power Play usages were excluded from clustering analysis to ensure statistical reliability.
+Data preprocessing involved filtering invalid coordinate sentinels, mapping shot tasks to strategy labels, and aggregating shot-level data into end-level ``Performance Vectors'' for opponent profiling. Teams with fewer than 8 Power Play usages were excluded from clustering analysis to ensure statistical reliability.
 
 \section{Methodology}
 
@@ -255,19 +255,19 @@ This confirms that \textit{what} shot we play and \textit{how well} we execute i
 \end{figure}
 
 \subsection{Spatial Precision Analytics}
-To move beyond abstract strategy, we analyzed the spatial distribution of shots using \textbf{Kernel Density Estimation (KDE)}. Figure \ref{fig:spatial} reveals the spatial patterns of defensive shots in Power Play ends.
+To move beyond abstract strategy, we analyzed the spatial distribution of shots using \textbf{grid-based frequency maps} because locations are recorded on a discrete sensor grid. Figure \ref{fig:spatial} reveals the target patterns of defensive shots in Power Play ends.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.7\textwidth]{figures/spatial_with_house.png}
-    \caption{\textbf{Spatial Heatmap with House Overlay.} Draw/Guard shots in Power Play ends (N=389). The curling house rings are overlaid for reference. Coordinate units are sensor-based (approximately 273 units = 1 foot). The KDE reveals clustering near the house center.}
+    \caption{\textbf{Spatial Target Grid with House Overlay.} Draw/Guard shots in Power Play ends (N=389). Squares represent discrete target locations and are sized by frequency. The house overlay is scaled to the dominant tee-line band for orientation only (sensor grid units).}
     \label{fig:spatial}
 \end{figure}
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.95\textwidth]{figures/spatial_by_quality.png}
-    \caption{\textbf{Spatial Distribution by Execution Quality.} High-quality shots (left) show tighter clustering than low-quality shots (right), validating the ``margin of error'' concept for training.}
+    \caption{\textbf{Spatial Distribution by Execution Quality.} Target locations are discrete; color shows share of shots within each quality group. High-quality shots (left) concentrate on fewer targets, while low-quality shots (right) spread across more locations.}
     \label{fig:spatial_quality}
 \end{figure}
 
