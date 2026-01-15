@@ -28,7 +28,7 @@
 \maketitle
 
 \begin{abstract}
-\noindent This report presents the development, methodology, and strategic implications of the \textbf{Counter-Strategy Simulator}, an advanced analytics engine designed to optimize defensive decision-making in Mixed Doubles Curling. The introduction of the ``Power Play'' in Mixed Doubles has fundamentally altered the strategic landscape, creating high-leverage situations where traditional heuristics often fail. By leveraging a dataset of over \textbf{26,000 elite-level shots} across \textbf{598 Power Play ends}, we construct a rigorous probabilistic framework for defensive play. Our system integrates \textbf{Gaussian Mixture Models (GMM)} to profile opponent tendencies, \textbf{discrete spatial target maps} to characterize placement precision, a \textbf{Random Forest classifier} to predict opponent responses, and a \textbf{Risk-Aware Optimizer} using Conditional Value at Risk (CVaR) to tailor decisions to game state. We demonstrate that the ``Guard Wall'' strategy provides superior risk-adjusted performance across most scenarios, with our execution sensitivity analysis showing it has a forgiveness gap of only 0.03 points compared to 0.21 for alternative strategies. Our ``Coach-Ready'' playbook provides specific, actionable guidelines backed by stratified statistical analysis that controls for selection bias in Power Play timing decisions.
+\noindent This report presents the development, methodology, and strategic implications of the \textbf{Counter-Strategy Simulator}, an advanced analytics engine designed to optimize defensive decision-making in Mixed Doubles Curling. The introduction of the ``Power Play'' in Mixed Doubles has fundamentally altered the strategic landscape, creating high-leverage situations where traditional heuristics often fail. By leveraging a dataset of over \textbf{26,000 elite-level shots} across \textbf{598 Power Play ends}, we construct a rigorous probabilistic framework for defensive play. Our system integrates \textbf{Gaussian Mixture Models (GMM)} to profile opponent tendencies, \textbf{discrete spatial target maps} to characterize placement precision, a \textbf{Random Forest classifier} to predict opponent responses, and a \textbf{Risk-Aware Optimizer} using Conditional Value at Risk (CVaR) to tailor decisions to game state. Guard Wall is the default choice because it minimizes tail risk in aggregate and is most execution-forgiving, while Draw/Guard is preferred in steal-chasing states. Our ``Coach-Ready'' playbook provides specific, actionable guidelines backed by stratified statistical analysis that controls for selection bias in Power Play timing decisions.
 \end{abstract}
 
 \section{Introduction}
@@ -66,7 +66,7 @@ The core of our analysis is the \texttt{Stones.csv} dataset, a comprehensive rec
     \item \textbf{Game State:} The End Number (1-8), Score Differential, and Hammer Possession.
     \item \textbf{Shot Metadata:} The ``Task ID'' (intended shot type) and ``Turn'' (handle).
     \item \textbf{Execution Metrics:} A subjective ``Success Rating'' (0-4) and the final coordinates ($x, y$) of the stone on a discrete sensor grid. We treat these coordinates as categorical target points for spatial analysis.
-    \item \textbf{Outcomes:} The final score of the end, which serves as our ``ground truth'' label for strategic success.
+    \item \textbf{Outcomes:} The final score of the end. For defensive analysis we use signed outcomes: positive for hammer points, negative for defensive steals, and zero for blanks.
 \end{itemize}
 
 Data preprocessing involved filtering invalid coordinate sentinels, mapping shot tasks to strategy labels, and aggregating shot-level data into end-level ``Performance Vectors'' for opponent profiling. Teams with fewer than 8 Power Play usages were excluded from clustering analysis to ensure statistical reliability.
@@ -172,7 +172,7 @@ Table \ref{tab:risk} shows our computed risk metrics for each strategy.
 
 \begin{table}[H]
 \centering
-\caption{\textbf{Risk Metrics by Strategy.} CVaR provides a more complete picture than Expected Value alone. Guard Wall dominates on risk-adjusted metrics.}
+\caption{\textbf{Risk Metrics by Strategy.} CVaR provides a more complete picture than Expected Value alone. Guard Wall is the default choice on risk-adjusted metrics in aggregate, while Draw/Guard is used for steal-chasing states.}
 \label{tab:risk}
 \begin{tabular}{lcccccc}
 \toprule
@@ -211,6 +211,8 @@ Note: In Mixed Doubles, the Power Play is available in all ends; our data showin
 
 We further stratify within hammer ends by pre-end score differential (hammer inferred from the last stone in each end and score differential from cumulative scoring). Appendix Table \ref{tab:timing_score_state} shows the Power Play advantage persists in tied and trailing states.
 
+Timing remains partially confounded by unobserved intent such as team strategy and opponent preparation, so we treat these results as descriptive evidence rather than a causal estimate.
+
 \section{Advanced Analytics}
 
 \subsection{Opponent Response Modeling (``The Mind Reader'')}
@@ -233,12 +235,13 @@ Test Accuracy & 65.5\% \\
 F1 (Macro) & 0.595 \\
 F1 (Weighted) & 0.612 \\
 Log Loss & 0.987 \\
+Top-2 Accuracy & 100.0\% (two classes) \\
 CV Mean Accuracy & 73.7\% $\pm$ 3.8\% \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Test accuracy (65.5\%) trails cross-validated accuracy (73.7\%), so we use the model as a probabilistic prior rather than a deterministic rule.
+Test accuracy (65.5\%) trails cross-validated accuracy (73.7\%), so we use the model as a probabilistic prior rather than a deterministic rule. With two response classes after filtering, top-2 accuracy is 100\%, which is expected and does not imply perfect calibration.
 
 \subsubsection{Feature Importance}
 The top predictive features are:
@@ -311,7 +314,7 @@ Draw/Guard & 389 & 1.34 & 1.63 & 0.29 & -0.103 & 0.004 \\
 
 \section{End-to-End Evaluation}
 
-Table \ref{tab:e2e} provides a comprehensive view of strategy performance across different game states. We flag low-confidence rows when $N < 20$.
+Table \ref{tab:e2e} provides a comprehensive view of strategy performance across different game states. We flag low-confidence rows when $N < 30$.
 
 \begin{table}[H]
 \centering
@@ -341,7 +344,7 @@ Based on our models, here are the 5 Golden Rules for Mixed Doubles Defense:
 \begin{enumerate}
     \item \textbf{Default Strategy:}
     \begin{itemize}
-        \item \textbf{Call:} \textbf{Guard Wall}. It has the best risk-adjusted performance (lowest CVaR) and is highly forgiving (Gap = 0.01).
+        \item \textbf{Call:} \textbf{Guard Wall}. It has the best risk-adjusted performance in aggregate (lowest CVaR) and is highly forgiving (Gap = 0.01).
     \end{itemize}
 
     \item \textbf{Protecting a Lead (Up 2+, End 6-8):}
@@ -439,7 +442,7 @@ The Counter-Strategy Simulator represents a significant advance in curling analy
     \item \textbf{Rigorous Methodology:} Full algorithmic specification of the simulator, with CVaR-based risk optimization replacing ad-hoc loss functions.
     \item \textbf{Selection Bias Control:} Stratified analysis of Power Play timing that separates ``when teams use it'' from ``when it's optimal.''
     \item \textbf{Validated Models:} Random Forest opponent response model with 74\% CV accuracy and documented feature importance.
-    \item \textbf{Actionable Insights:} Guard Wall emerges as the dominant strategy on risk-adjusted metrics, with a forgiveness Gap roughly 25x smaller than alternatives.
+    \item \textbf{Actionable Insights:} Guard Wall is the default strategy on risk-adjusted metrics in aggregate, with a forgiveness Gap roughly 30x smaller than alternatives. Draw/Guard is preferred in steal-chasing states.
 \end{enumerate}
 
 Whether it's the ``Golden Window'' for Power Play timing or the ``Risk-Aware'' selection of defensive shots, our tool empowers teams to master the ``Art of the Steal.''
