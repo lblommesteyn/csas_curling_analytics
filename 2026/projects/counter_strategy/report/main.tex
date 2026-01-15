@@ -37,7 +37,7 @@ The rapid ascent of sports analytics has fundamentally changed how games are pla
 
 Mixed Doubles Curling, a faster-paced variation of the traditional game, introduces unique constraints and opportunities. Teams play with only five stones per end, and two stones are pre-positioned at the start of each end. Most critically, each team has access to a ``Power Play'' once per game, which allows them to move the pre-positioned stones from the center line to the wing. This creates a ``corner'' situation that is notoriously difficult to defend, often leading to multi-point ends.
 
-For a defensive team (without the Hammer), the Power Play represents a crisis. The goal shifts from ``forcing a single point'' to ``preventing a disaster.'' Traditional coaching heuristics---such as ``always control the center'' or ``freeze to the button''---are often insufficient in these dynamic, high-variance scenarios. Coaches face three critical questions:
+For a defensive team (without the Hammer), the Power Play represents a crisis. The goal shifts from ``forcing a single point'' to ``preventing a disaster.'' Traditional coaching heuristics such as ``always control the center'' or ``freeze to the button'' are often insufficient in these dynamic, high-variance scenarios. Coaches face three critical questions:
 \begin{enumerate}
     \item \textbf{Timing:} When is the optimal moment to deploy the Power Play to maximize Win Probability?
     \item \textbf{Adaptation:} How should defensive strategy change against an ``Aggressive'' opponent versus a ``Conservative'' one?
@@ -57,7 +57,7 @@ In 2012, Kirk Goldsberry revolutionized basketball analytics with ``CourtVision'
 The concept of ``Expected Goals'' (xG) in soccer \cite{green2012} allows analysts to quantify the quality of a scoring chance, independent of the outcome. Similarly, our ``Empirical Priors'' module assigns an ``Expected Score'' to every defensive decision. However, maximizing Expected Score is not always the goal. In the NFL, Lock and Nettleton \cite{lock2014} demonstrated that teams should maximize \textbf{Win Probability Added (WPA)}, not just points. We adopt this framework, using Monte Carlo simulation to value the ``Hammer'' and score differential. This allows our agent to make ``suboptimal'' point-expectancy plays if they increase the probability of winning the match (e.g., gambling for a steal when down by 2).
 
 \subsection{Opponent Modeling and Game Theory}
-In imperfect information games like Poker, optimal play requires modeling the opponent's range of actions. Billings et al. \cite{billings2002} showed that identifying opponent ``clusters'' (e.g., tight-passive vs. loose-aggressive) is key to exploitation. We apply \textbf{Gaussian Mixture Models (GMM)} to cluster curling teams based on their Power Play tendencies. This allows our simulator to move beyond ``Game Theoretic Optimal'' (GTO) play---which assumes a perfect opponent---to ``Exploitative Play,'' which targets specific strategic weaknesses in the opposition.
+In imperfect information games like Poker, optimal play requires modeling the opponent's range of actions. Billings et al. \cite{billings2002} showed that identifying opponent ``clusters'' (e.g., tight-passive vs. loose-aggressive) is key to exploitation. We apply \textbf{Gaussian Mixture Models (GMM)} to cluster curling teams based on their Power Play tendencies. This allows our simulator to move beyond ``Game Theoretic Optimal'' (GTO) play, which assumes a perfect opponent, to ``Exploitative Play,'' which targets specific strategic weaknesses in the opposition.
 
 \section{Data Description}
 
@@ -90,12 +90,12 @@ The GMM assumes that the population of teams is a mixture of $K$ underlying Gaus
 \end{equation}
 
 \subsubsection{Model Selection via BIC}
-We selected the optimal number of clusters using the Bayesian Information Criterion (BIC). Figure \ref{fig:bic} shows the BIC curve for $K = 1$ to $6$. While BIC is minimized at $K=1$ (suggesting homogeneity in our sample), we retain $K=3$ for interpretive value, recognizing this represents stylistic variation within a competitive field.
+We selected the optimal number of clusters using the Bayesian Information Criterion (BIC). Figure \ref{fig:bic} shows the BIC curve for $K = 1$ to $6$. While BIC is minimized at $K=1$ (suggesting near-homogeneity in our sample), we report a $K=3$ archetype lens for coaching communication and tactical discussion.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.8\textwidth]{figures/bic_curve.png}
-    \caption{\textbf{GMM Model Selection.} BIC and AIC curves for $K=1$ to 6. The relatively flat curve suggests teams are more homogeneous at elite level than expected, but $K=3$ provides useful tactical segmentation.}
+    \caption{\textbf{GMM Model Selection.} BIC and AIC curves for $K=1$ to 6. The relatively flat curve suggests near-homogeneity at the elite level, while the $K=3$ view provides a practical coaching lens.}
     \label{fig:bic}
 \end{figure}
 
@@ -117,16 +117,14 @@ The core of our system is a Monte Carlo simulator that estimates the distributio
 \REQUIRE End $e$, Score differential $\Delta$, Hammer $h$, Opponent cluster $c$, Defense strategy $d$
 \ENSURE Score distribution $P(S|d)$, Risk metrics
 \STATE \textbf{Input Processing:}
-\STATE $\quad$ Load empirical execution distribution $P(\text{Exec}|d)$ from historical data
-\STATE $\quad$ Load empirical score distribution $P(S|d, \text{Exec})$ from historical data
+\STATE $\quad$ Load execution distribution $P(\text{Exec}|d,\text{skill})$ from historical data
+\STATE $\quad$ Load conditional score tables $P(S|d,q,r,e,\Delta,h,c)$ with back-off to coarser bins
 \STATE $\quad$ Load opponent response model $f_{RF}$ (Random Forest)
 \FOR{$i = 1$ to $N_{sim} = 10,000$}
-    \STATE Sample execution quality: $q \sim P(\text{Exec}|d)$
-    \IF{$q \geq 3$}
-        \STATE Sample from high-quality outcomes: $s_i \sim P(S|d, \text{Exec} \geq 3)$
-    \ELSE
-        \STATE Sample from low-quality outcomes: $s_i \sim P(S|d, \text{Exec} < 3)$
-    \ENDIF
+    \STATE Sample execution quality: $q \sim P(\text{Exec}|d,\text{skill})$
+    \STATE Predict response distribution: $\pi_r = f_{RF}(e,\Delta,h,c,d,q,x,y)$
+    \STATE Sample opponent response: $r \sim \pi_r$
+    \STATE Sample end score: $s_i \sim P(S|d,q,r,e,\Delta,h,c)$
 \ENDFOR
 \STATE \textbf{Output Computation:}
 \STATE $\quad \hat{\mu} = \frac{1}{N_{sim}} \sum_{i=1}^{N_{sim}} s_i$ \hfill \textit{// Expected Value}
@@ -137,6 +135,8 @@ The core of our system is a Monte Carlo simulator that estimates the distributio
 \end{algorithmic}
 \end{algorithm}
 
+\noindent \textbf{Conditioning and back-off.} In practice, not all state combinations are densely observed. We estimate $P(\text{Exec}|d,\text{skill})$ from rating buckets, and we condition outcome tables on $(d,q,r,e,\Delta,h,c)$ when sample sizes permit. When data are sparse, we back off to coarser bins (for example, dropping $r$ or $c$) and explicitly note which variables are marginalized in each analysis.
+
 \subsection{Risk-Aware Optimization (CVaR)}
 Standard game theory often assumes a ``Minimax'' approach, where an agent minimizes the maximum possible loss. In curling, we adapt this to a \textbf{risk-weighted} framework using Conditional Value at Risk (CVaR), a coherent risk measure widely used in quantitative finance.
 
@@ -145,7 +145,7 @@ Given a score distribution $S$, the CVaR at level $\alpha$ is:
 \begin{equation}
     \text{CVaR}_\alpha(S) = \mathbb{E}[S | S \geq \text{VaR}_\alpha(S)]
 \end{equation}
-where $\text{VaR}_\alpha(S)$ is the $(1-\alpha)$-quantile of $S$. For $\alpha = 0.10$, CVaR represents the expected score in the \textit{worst 10\% of outcomes}---precisely the ``big end'' scenarios coaches fear most.
+where $\text{VaR}_\alpha(S)$ is the $(1-\alpha)$-quantile of $S$. For $\alpha = 0.10$, CVaR represents the expected score in the \textit{worst 10\% of outcomes}, precisely the ``big end'' scenarios coaches fear most.
 
 \subsubsection{Risk Profiles}
 We define three risk profiles:
@@ -186,7 +186,7 @@ Draw/Guard & 389 & 1.40 & 2.09 & 4.08 & 21.6\% & 20.8\% \\
 
 \section{Power Play Timing: Controlling for Selection Bias}
 
-One of the most frequent questions from coaches is ``When should we use the Power Play?'' Naive analysis of usage patterns is vulnerable to \textbf{selection bias}---teams use the Power Play when the game is close because it's late, not necessarily because it's optimal then.
+One of the most frequent questions from coaches is ``When should we use the Power Play?'' Naive analysis of usage patterns is vulnerable to \textbf{selection bias} because teams use the Power Play when the game is close because it's late, not necessarily because it's optimal then.
 
 \subsection{Stratified Analysis}
 To address this, we stratified our analysis by End number and compared Power Play ends to standard ends within each stratum. Figure \ref{fig:stratified} shows the results.
@@ -205,9 +205,11 @@ Key findings:
     \item \textbf{End 8 (Desperation):} Effect size drops dramatically and is not significant ($p = 0.61$). This suggests the Power Play is \textit{less} effective in the final end, possibly due to opponent preparation or different strategic dynamics.
 \end{itemize}
 
-\textbf{Recommendation:} Use the Power Play in \textbf{Ends 6 or 7} when you have the Hammer and are tied or trailing by 1. Saving it for End 8 when trailing by 2+ may be \textit{suboptimal}---our data suggests it is more effective to use it earlier to generate momentum.
+\textbf{Recommendation:} Use the Power Play in \textbf{Ends 6 or 7} when you have the Hammer and are tied or trailing by 1. Saving it for End 8 when trailing by 2+ may be \textit{suboptimal}; our data suggests it is more effective to use it earlier to generate momentum.
 
 Note: In Mixed Doubles, the Power Play is available in all ends; our data showing concentration in Ends 3-8 reflects strategic choice rather than rule constraints.
+
+We further stratify within hammer ends by pre-end score differential (hammer inferred from the last stone in each end and score differential from cumulative scoring). Appendix Table \ref{tab:timing_score_state} shows the Power Play advantage persists in tied and trailing states.
 
 \section{Advanced Analytics}
 
@@ -236,13 +238,15 @@ CV Mean Accuracy & 73.7\% $\pm$ 3.8\% \\
 \end{tabular}
 \end{table}
 
+Test accuracy (65.5\%) trails cross-validated accuracy (73.7\%), so we use the model as a probabilistic prior rather than a deterministic rule.
+
 \subsubsection{Feature Importance}
 The top predictive features are:
 \begin{enumerate}
-    \item \textbf{Our Shot Type (Task)} --- 41.6\% importance
-    \item \textbf{Our Execution Quality (Points)} --- 29.0\% importance
-    \item \textbf{Stone Y Position} --- 16.0\% importance
-    \item \textbf{Stone X Position} --- 13.4\% importance
+    \item \textbf{Our Shot Type (Task)}: 41.6\% importance
+    \item \textbf{Our Execution Quality (Points)}: 29.0\% importance
+    \item \textbf{Stone Y Position}: 16.0\% importance
+    \item \textbf{Stone X Position}: 13.4\% importance
 \end{enumerate}
 
 This confirms that \textit{what} shot we play and \textit{how well} we execute it are more predictive of opponent response than the exact stone position.
@@ -303,28 +307,28 @@ Draw/Guard & 389 & 1.34 & 1.63 & 0.29 & -0.103 & 0.004 \\
     \label{fig:exec}
 \end{figure}
 
-\textbf{Key Insight:} The Guard Wall strategy has a Gap of only 0.01 points---essentially, a missed Guard Wall is no worse than a made one. In contrast, Draw/Guard has a Gap of 0.29 points, meaning poor execution costs significantly more. This makes Guard Wall the preferred choice for players with inconsistent draw weight.
+\textbf{Key Insight:} The Guard Wall strategy has a Gap of only 0.01 points; essentially, a missed Guard Wall is no worse than a made one. In contrast, Draw/Guard has a Gap of 0.29 points, meaning poor execution costs significantly more. This makes Guard Wall the preferred choice for players with inconsistent draw weight.
 
 \section{End-to-End Evaluation}
 
-Table \ref{tab:e2e} provides a comprehensive view of strategy performance across different game states.
+Table \ref{tab:e2e} provides a comprehensive view of strategy performance across different game states. We flag low-confidence rows when $N < 20$.
 
 \begin{table}[H]
 \centering
 \caption{\textbf{End-to-End Strategy Evaluation.} Performance metrics by End and Strategy. Guard Wall consistently shows lower CVaR (tail risk).}
 \label{tab:e2e}
-\begin{tabular}{cccccccc}
+\begin{tabular}{ccccccccc}
 \toprule
-End & Strategy & N & EV & CVaR$_{10\%}$ & P($\geq$3) & P(Steal) & Profile \\
+End & Strategy & N & EV & CVaR$_{10\%}$ & P($\geq$3) & P(Steal) & Profile & Conf. \\
 \midrule
-5 & Draw/Guard & 41 & 1.22 & 3.00 & 22.0\% & 22.0\% & Aggressive \\
-5 & Guard Wall & 36 & 1.31 & 3.20 & 27.8\% & 19.4\% & Aggressive \\
-6 & Draw/Guard & 123 & 1.37 & 3.38 & 23.6\% & 17.9\% & Aggressive \\
-6 & Guard Wall & 81 & 1.09 & 3.15 & 16.0\% & 23.5\% & Aggressive \\
-7 & Draw/Guard & 151 & 1.34 & 3.44 & 21.2\% & 19.2\% & Aggressive \\
-7 & Guard Wall & 54 & 1.48 & 3.55 & 20.4\% & 14.8\% & Standard \\
-8 & Draw/Guard & 53 & 2.32 & 9.00 & 26.4\% & 24.5\% & Aggressive \\
-8 & Guard Wall & 11 & 1.91 & 3.00 & 36.4\% & 0.0\% & Standard \\
+5 & Draw/Guard & 41 & 1.22 & 3.00 & 22.0\% & 22.0\% & Aggressive & OK \\
+5 & Guard Wall & 36 & 1.31 & 3.20 & 27.8\% & 19.4\% & Aggressive & OK \\
+6 & Draw/Guard & 123 & 1.37 & 3.38 & 23.6\% & 17.9\% & Aggressive & OK \\
+6 & Guard Wall & 81 & 1.09 & 3.15 & 16.0\% & 23.5\% & Aggressive & OK \\
+7 & Draw/Guard & 151 & 1.34 & 3.44 & 21.2\% & 19.2\% & Aggressive & OK \\
+7 & Guard Wall & 54 & 1.48 & 3.55 & 20.4\% & 14.8\% & Standard & OK \\
+8 & Draw/Guard & 53 & 2.32 & 9.00 & 26.4\% & 24.5\% & Aggressive & OK \\
+8 & Guard Wall & 11 & 1.91 & 3.00 & 36.4\% & 0.0\% & Standard & Low \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -361,7 +365,7 @@ Based on our models, here are the 5 Golden Rules for Mixed Doubles Defense:
     \item \textbf{Vs. Different Opponents:}
     \begin{itemize}
         \item \textbf{Aggressive teams} (Cluster 2: AUS, USA, SUI): Expect big-end attempts. Guard Wall minimizes P($\geq$3).
-        \item \textbf{Conservative teams} (Cluster 1: CZE, DEN, GER): They will try to blank. Standard play is sufficient.
+        \item \textbf{Conservative teams} (Cluster 1: CZE, DEN, GER): Lower $P(\geq 3)$ and higher $P_{blank}$ in the profile. Standard play is sufficient.
     \end{itemize}
 \end{enumerate}
 
@@ -387,6 +391,27 @@ End & $\Delta$ & Hammer & Profile & Call & EV & P($\geq$3) & P(Steal) \\
 \end{tabular}
 \end{table}
 
+\section{Appendix A: Timing Stratification by Score State}
+
+Table \ref{tab:timing_score_state} stratifies Power Play timing by score differential entering the end for the hammer team. Hammer is inferred from the last stone of each end, and score differential is computed from cumulative scoring. The table compares average hammer scores in Power Play ends versus hammer ends without Power Play.
+
+\begin{table}[H]
+\centering
+\caption{\textbf{Power Play Timing by Score State (Hammer Ends).}}
+\label{tab:timing_score_state}
+\begin{tabular}{lcccc}
+\toprule
+Score Diff (Hammer) & PP Mean (N) & No PP Mean (N) & Difference \\
+\midrule
+$\leq -2$ & 1.47 (289) & 1.50 (830) & -0.03 \\
+-1 & 1.78 (87) & 1.16 (427) & 0.62 \\
+0 & 1.52 (75) & 1.11 (268) & 0.41 \\
++1 & 1.66 (61) & 1.27 (182) & 0.39 \\
+$\geq +2$ & 2.17 (86) & 1.48 (332) & 0.69 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \section{Limitations and Future Work}
 
 While our simulator provides robust insights, several limitations should be noted:
@@ -394,7 +419,7 @@ While our simulator provides robust insights, several limitations should be note
 \begin{enumerate}
     \item \textbf{Data Scope:} Our data is drawn exclusively from elite competitions; execution rates for club-level players will differ significantly.
     \item \textbf{Steal Probability:} Using signed outcomes (negative scores for defensive steals), both main strategies show non-trivial steal rates (roughly 19--21\%). This is sensitive to scorekeeping conventions and should be validated on additional events.
-    \item \textbf{Cluster Homogeneity:} BIC suggests $K=1$ is optimal, indicating elite teams are more homogeneous than expected. Our $K=3$ clustering provides tactical value but should be interpreted with caution.
+    \item \textbf{Cluster Homogeneity:} BIC suggests $K=1$ is optimal, indicating elite teams are more homogeneous than expected. We use the $K=3$ view as a coaching lens and as a prior, not as a hard label.
     \item \textbf{Execution Ratings:} The ``Points'' field (0-4) is subjectively assigned by scorers and may vary between events.
 \end{enumerate}
 
