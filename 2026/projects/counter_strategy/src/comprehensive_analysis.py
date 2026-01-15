@@ -508,6 +508,47 @@ def compute_cvar(scores: np.ndarray, alpha: float = 0.1) -> float:
     return tail.mean() if len(tail) > 0 else var
 
 
+def compute_signed_results(ends: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build signed outcomes for Power Play ends from both teams' rows.
+
+    Positive = hammer scores, Negative = defensive steal, Zero = blank.
+    """
+    ends = ends[["CompetitionID", "SessionID", "GameID", "EndID", "TeamID", "PowerPlay", "Result"]].copy()
+    ends["PowerPlay"] = ends["PowerPlay"].fillna(0)
+    ends["Result"] = ends["Result"].fillna(0).astype(int)
+
+    processed = []
+    for key, group in ends.groupby(["CompetitionID", "SessionID", "GameID", "EndID"]):
+        if len(group) != 2:
+            continue
+
+        hammer_rows = group[group["PowerPlay"] > 0]
+        defensive_rows = group[group["PowerPlay"] == 0]
+        if hammer_rows.empty or defensive_rows.empty:
+            continue
+
+        hammer_result = int(hammer_rows["Result"].iloc[0])
+        defensive_result = int(defensive_rows["Result"].iloc[0])
+
+        if hammer_result > 0:
+            signed_result = hammer_result
+        elif defensive_result > 0:
+            signed_result = -defensive_result
+        else:
+            signed_result = 0
+
+        processed.append({
+            "CompetitionID": key[0],
+            "SessionID": key[1],
+            "GameID": key[2],
+            "EndID": key[3],
+            "SignedResult": signed_result,
+        })
+
+    return pd.DataFrame(processed)
+
+
 def compute_risk_metrics_by_strategy() -> pd.DataFrame:
     """
     Compute various risk metrics for each defensive strategy:
@@ -520,9 +561,7 @@ def compute_risk_metrics_by_strategy() -> pd.DataFrame:
     ends = load_csv("ends")
     stones = load_csv("stones")
 
-    # Filter PP ends
-    pp_ends = ends[ends["PowerPlay"].fillna(0) > 0].copy()
-    pp_ends["Result"] = pp_ends["Result"].fillna(0).astype(int)
+    pp_signed = compute_signed_results(ends)
 
     # Get first shot (defensive)
     stones["ShotID"] = pd.to_numeric(stones["ShotID"], errors="coerce")
@@ -531,7 +570,7 @@ def compute_risk_metrics_by_strategy() -> pd.DataFrame:
     ).first().reset_index()
 
     # Merge
-    merged = pp_ends.merge(
+    merged = pp_signed.merge(
         first_shots[["CompetitionID", "SessionID", "GameID", "EndID", "Task", "Points"]],
         on=["CompetitionID", "SessionID", "GameID", "EndID"],
         how="inner"
@@ -542,7 +581,7 @@ def compute_risk_metrics_by_strategy() -> pd.DataFrame:
 
     results = []
     for strategy, group in merged.groupby("Strategy"):
-        scores = group["Result"].values
+        scores = group["SignedResult"].values
 
         if len(scores) < 10:
             continue
@@ -555,7 +594,7 @@ def compute_risk_metrics_by_strategy() -> pd.DataFrame:
             "CVaR_10": compute_cvar(scores, 0.10),
             "CVaR_20": compute_cvar(scores, 0.20),
             "P_Big_End": (scores >= 3).mean(),
-            "P_Steal": (scores == 0).mean(),  # 0 points = stolen or blanked
+            "P_Steal": (scores < 0).mean(),
             "Max_Score": scores.max(),
             "Median": np.median(scores)
         })
@@ -627,15 +666,14 @@ def compute_execution_sensitivity_v2() -> Tuple[pd.DataFrame, pd.DataFrame]:
     ends = load_csv("ends")
     stones = load_csv("stones")
 
-    pp_ends = ends[ends["PowerPlay"].fillna(0) > 0].copy()
-    pp_ends["Result"] = pp_ends["Result"].fillna(0).astype(int)
+    pp_signed = compute_signed_results(ends)
 
     stones["ShotID"] = pd.to_numeric(stones["ShotID"], errors="coerce")
     first_shots = stones.sort_values("ShotID").groupby(
         ["CompetitionID", "SessionID", "GameID", "EndID"]
     ).first().reset_index()
 
-    merged = pp_ends.merge(
+    merged = pp_signed.merge(
         first_shots[["CompetitionID", "SessionID", "GameID", "EndID", "Task", "Points"]],
         on=["CompetitionID", "SessionID", "GameID", "EndID"],
         how="inner"
@@ -652,8 +690,8 @@ def compute_execution_sensitivity_v2() -> Tuple[pd.DataFrame, pd.DataFrame]:
             continue
 
         # High vs Low quality
-        high = group[group["Points"] >= 3]["Result"]
-        low = group[group["Points"] <= 2]["Result"]
+        high = group[group["Points"] >= 3]["SignedResult"]
+        low = group[group["Points"] <= 2]["SignedResult"]
 
         if len(high) < 5 or len(low) < 5:
             continue
@@ -669,7 +707,7 @@ def compute_execution_sensitivity_v2() -> Tuple[pd.DataFrame, pd.DataFrame]:
 
         # Slope regression
         X = group["Points"].values.reshape(-1, 1)
-        y = group["Result"].values
+        y = group["SignedResult"].values
         slope, intercept, r_value, p_value, std_err = stats.linregress(X.flatten(), y)
 
         results.append({
@@ -689,7 +727,7 @@ def compute_execution_sensitivity_v2() -> Tuple[pd.DataFrame, pd.DataFrame]:
             regression_data.append({
                 "Strategy": strategy,
                 "Points": row["Points"],
-                "Result": row["Result"]
+                "Result": row["SignedResult"]
             })
 
     return pd.DataFrame(results), pd.DataFrame(regression_data)
@@ -1085,8 +1123,7 @@ def create_end_to_end_table() -> pd.DataFrame:
     ends = load_csv("ends")
     stones = load_csv("stones")
 
-    pp_ends = ends[ends["PowerPlay"].fillna(0) > 0].copy()
-    pp_ends["Result"] = pp_ends["Result"].fillna(0).astype(int)
+    pp_signed = compute_signed_results(ends)
 
     # Get first shot strategy
     stones["ShotID"] = pd.to_numeric(stones["ShotID"], errors="coerce")
@@ -1094,7 +1131,7 @@ def create_end_to_end_table() -> pd.DataFrame:
         ["CompetitionID", "SessionID", "GameID", "EndID"]
     ).first().reset_index()
 
-    merged = pp_ends.merge(
+    merged = pp_signed.merge(
         first_shots[["CompetitionID", "SessionID", "GameID", "EndID", "Task"]],
         on=["CompetitionID", "SessionID", "GameID", "EndID"],
         how="inner"
@@ -1114,7 +1151,7 @@ def create_end_to_end_table() -> pd.DataFrame:
             if len(strat_data) < 5:
                 continue
 
-            scores = strat_data["Result"].values
+            scores = strat_data["SignedResult"].values
 
             results.append({
                 "End": end_num,
@@ -1123,7 +1160,7 @@ def create_end_to_end_table() -> pd.DataFrame:
                 "EV": scores.mean(),
                 "CVaR_10": compute_cvar(scores, 0.10),
                 "P(>=3)": (scores >= 3).mean() * 100,
-                "P(Steal)": (scores == 0).mean() * 100  # 0 points = stolen or blanked
+                "P(Steal)": (scores < 0).mean() * 100
             })
 
     df = pd.DataFrame(results)

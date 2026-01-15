@@ -1,9 +1,9 @@
 End,Score_Diff,Hammer,Risk_Profile,Recommended_Call,Predicted_EV,P_Big_End,P_Steal
-6,-2,Opponent,Aggressive,Draw/Guard,1.70,21.6%,0.0%
-6,0,Opponent,Standard,Guard Wall,1.53,20.2%,0.0%
-6,2,Opponent,Conservative,Guard Wall,1.53,20.2%,0.0%
-7,-1,Us,Aggressive,Draw/Guard,1.70,21.6%,0.0%
-7,1,Us,Standard,Guard Wall,1.53,20.2%,0.0%
-8,-2,Opponent,Aggressive,Draw/Guard,1.70,21.6%,0.0%
-8,0,Opponent,Standard,Guard Wall,1.53,20.2%,0.0%
-8,2,Us,Conservative,Guard Wall,1.53,20.2%,0.0%
+6,-2,Opponent,Aggressive,Draw/Guard,1.40,21.6%,20.8%
+6,0,Opponent,Standard,Guard Wall,1.26,20.2%,19.2%
+6,2,Opponent,Conservative,Guard Wall,1.26,20.2%,19.2%
+7,-1,Us,Aggressive,Draw/Guard,1.40,21.6%,20.8%
+7,1,Us,Standard,Guard Wall,1.26,20.2%,19.2%
+8,-2,Opponent,Aggressive,Draw/Guard,1.40,21.6%,20.8%
+8,0,Opponent,Standard,Guard Wall,1.26,20.2%,19.2%
+8,2,Us,Conservative,Guard Wall,1.26,20.2%,19.2%

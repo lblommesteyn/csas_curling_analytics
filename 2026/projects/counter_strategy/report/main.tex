@@ -178,8 +178,8 @@ Table \ref{tab:risk} shows our computed risk metrics for each strategy.
 \toprule
 Strategy & N & EV & Std Dev & CVaR$_{10\%}$ & P($\geq$3) & P(Steal) \\
 \midrule
-Guard Wall & 203 & 1.53 & 1.12 & 3.24 & 20.2\% & 0.0\% \\
-Draw/Guard & 389 & 1.70 & 1.71 & 4.08 & 21.6\% & 0.0\% \\
+Guard Wall & 203 & 1.26 & 1.58 & 3.24 & 20.2\% & 19.2\% \\
+Draw/Guard & 389 & 1.40 & 2.09 & 4.08 & 21.6\% & 20.8\% \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -290,8 +290,8 @@ We define:
 \toprule
 Strategy & N & $E_{high}$ & $E_{low}$ & Gap ($\Delta$) & Slope & $R^2$ \\
 \midrule
-Guard Wall & 203 & 1.52 & 1.55 & \textbf{0.03} & -0.037 & 0.003 \\
-Draw/Guard & 389 & 1.66 & 1.86 & 0.21 & -0.081 & 0.003 \\
+Guard Wall & 203 & 1.26 & 1.27 & \textbf{0.01} & -0.051 & 0.003 \\
+Draw/Guard & 389 & 1.34 & 1.63 & 0.29 & -0.103 & 0.004 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -303,7 +303,7 @@ Draw/Guard & 389 & 1.66 & 1.86 & 0.21 & -0.081 & 0.003 \\
     \label{fig:exec}
 \end{figure}
 
-\textbf{Key Insight:} The Guard Wall strategy has a Gap of only 0.03 points---essentially, a missed Guard Wall is no worse than a made one. In contrast, Draw/Guard has a Gap of 0.21 points, meaning poor execution costs significantly more. This makes Guard Wall the preferred choice for players with inconsistent draw weight.
+\textbf{Key Insight:} The Guard Wall strategy has a Gap of only 0.01 points---essentially, a missed Guard Wall is no worse than a made one. In contrast, Draw/Guard has a Gap of 0.29 points, meaning poor execution costs significantly more. This makes Guard Wall the preferred choice for players with inconsistent draw weight.
 
 \section{End-to-End Evaluation}
 
@@ -317,14 +317,14 @@ Table \ref{tab:e2e} provides a comprehensive view of strategy performance across
 \toprule
 End & Strategy & N & EV & CVaR$_{10\%}$ & P($\geq$3) & P(Steal) & Profile \\
 \midrule
-5 & Draw/Guard & 41 & 1.46 & 3.00 & 22.0\% & 0\% & Standard \\
-5 & Guard Wall & 36 & 1.61 & 3.20 & 27.8\% & 0\% & Standard \\
-6 & Draw/Guard & 123 & 1.62 & 3.38 & 23.6\% & 0\% & Standard \\
-6 & Guard Wall & 81 & 1.38 & 3.15 & 16.0\% & 0\% & Standard \\
-7 & Draw/Guard & 151 & 1.63 & 3.44 & 21.2\% & 0\% & Standard \\
-7 & Guard Wall & 54 & 1.74 & 3.55 & 20.4\% & 0\% & Standard \\
-8 & Draw/Guard & 53 & 2.66 & 9.00 & 26.4\% & 0\% & Standard \\
-8 & Guard Wall & 11 & 1.91 & 3.00 & 36.4\% & 0\% & Standard \\
+5 & Draw/Guard & 41 & 1.22 & 3.00 & 22.0\% & 22.0\% & Aggressive \\
+5 & Guard Wall & 36 & 1.31 & 3.20 & 27.8\% & 19.4\% & Aggressive \\
+6 & Draw/Guard & 123 & 1.37 & 3.38 & 23.6\% & 17.9\% & Aggressive \\
+6 & Guard Wall & 81 & 1.09 & 3.15 & 16.0\% & 23.5\% & Aggressive \\
+7 & Draw/Guard & 151 & 1.34 & 3.44 & 21.2\% & 19.2\% & Aggressive \\
+7 & Guard Wall & 54 & 1.48 & 3.55 & 20.4\% & 14.8\% & Standard \\
+8 & Draw/Guard & 53 & 2.32 & 9.00 & 26.4\% & 24.5\% & Aggressive \\
+8 & Guard Wall & 11 & 1.91 & 3.00 & 36.4\% & 0.0\% & Standard \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -337,7 +337,7 @@ Based on our models, here are the 5 Golden Rules for Mixed Doubles Defense:
 \begin{enumerate}
     \item \textbf{Default Strategy:}
     \begin{itemize}
-        \item \textbf{Call:} \textbf{Guard Wall}. It has the best risk-adjusted performance (lowest CVaR) and is highly forgiving (Gap = 0.03).
+        \item \textbf{Call:} \textbf{Guard Wall}. It has the best risk-adjusted performance (lowest CVaR) and is highly forgiving (Gap = 0.01).
     \end{itemize}
 
     \item \textbf{Protecting a Lead (Up 2+, End 6-8):}
@@ -349,7 +349,7 @@ Based on our models, here are the 5 Golden Rules for Mixed Doubles Defense:
     \item \textbf{Chasing the Game (Down 2+, End 5-8):}
     \begin{itemize}
         \item \textbf{Profile:} Aggressive (maximize steal probability).
-        \item \textbf{Call:} Neither strategy in our data shows significant steal probability. Consider higher-variance plays not in our dataset (e.g., Runback) or accept the need to force with Hammer.
+        \item \textbf{Call:} \textbf{Draw/Guard} when chasing. It carries higher tail risk, but has slightly higher steal probability than Guard Wall in aggregate (about 21\% vs. 19\%).
     \end{itemize}
 
     \item \textbf{Power Play Timing:}
@@ -375,14 +375,14 @@ Based on our models, here are the 5 Golden Rules for Mixed Doubles Defense:
 \toprule
 End & $\Delta$ & Hammer & Profile & Call & EV & P($\geq$3) & P(Steal) \\
 \midrule
-6 & -2 & Opp & Aggressive & Draw/Guard & 1.70 & 21.6\% & 0\% \\
-6 & 0 & Opp & Standard & Guard Wall & 1.53 & 20.2\% & 0\% \\
-6 & +2 & Opp & Conservative & Guard Wall & 1.53 & 20.2\% & 0\% \\
-7 & -1 & Us & Aggressive & Draw/Guard & 1.70 & 21.6\% & 0\% \\
-7 & +1 & Us & Standard & Guard Wall & 1.53 & 20.2\% & 0\% \\
-8 & -2 & Opp & Aggressive & Draw/Guard & 1.70 & 21.6\% & 0\% \\
-8 & 0 & Opp & Standard & Guard Wall & 1.53 & 20.2\% & 0\% \\
-8 & +2 & Us & Conservative & Guard Wall & 1.53 & 20.2\% & 0\% \\
+6 & -2 & Opp & Aggressive & Draw/Guard & 1.40 & 21.6\% & 20.8\% \\
+6 & 0 & Opp & Standard & Guard Wall & 1.26 & 20.2\% & 19.2\% \\
+6 & +2 & Opp & Conservative & Guard Wall & 1.26 & 20.2\% & 19.2\% \\
+7 & -1 & Us & Aggressive & Draw/Guard & 1.40 & 21.6\% & 20.8\% \\
+7 & +1 & Us & Standard & Guard Wall & 1.26 & 20.2\% & 19.2\% \\
+8 & -2 & Opp & Aggressive & Draw/Guard & 1.40 & 21.6\% & 20.8\% \\
+8 & 0 & Opp & Standard & Guard Wall & 1.26 & 20.2\% & 19.2\% \\
+8 & +2 & Us & Conservative & Guard Wall & 1.26 & 20.2\% & 19.2\% \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -393,7 +393,7 @@ While our simulator provides robust insights, several limitations should be note
 
 \begin{enumerate}
     \item \textbf{Data Scope:} Our data is drawn exclusively from elite competitions; execution rates for club-level players will differ significantly.
-    \item \textbf{Steal Probability:} Our dataset shows 0\% steal probability for both main strategies, limiting our ability to recommend aggressive play. This may reflect elite-level defensive competence or data collection bias.
+    \item \textbf{Steal Probability:} Using signed outcomes (negative scores for defensive steals), both main strategies show non-trivial steal rates (roughly 19--21\%). This is sensitive to scorekeeping conventions and should be validated on additional events.
     \item \textbf{Cluster Homogeneity:} BIC suggests $K=1$ is optimal, indicating elite teams are more homogeneous than expected. Our $K=3$ clustering provides tactical value but should be interpreted with caution.
     \item \textbf{Execution Ratings:} The ``Points'' field (0-4) is subjectively assigned by scorers and may vary between events.
 \end{enumerate}
@@ -414,7 +414,7 @@ The Counter-Strategy Simulator represents a significant advance in curling analy
     \item \textbf{Rigorous Methodology:} Full algorithmic specification of the simulator, with CVaR-based risk optimization replacing ad-hoc loss functions.
     \item \textbf{Selection Bias Control:} Stratified analysis of Power Play timing that separates ``when teams use it'' from ``when it's optimal.''
     \item \textbf{Validated Models:} Random Forest opponent response model with 74\% CV accuracy and documented feature importance.
-    \item \textbf{Actionable Insights:} Guard Wall emerges as the dominant strategy on risk-adjusted metrics, with a forgiveness Gap 7x smaller than alternatives.
+    \item \textbf{Actionable Insights:} Guard Wall emerges as the dominant strategy on risk-adjusted metrics, with a forgiveness Gap roughly 25x smaller than alternatives.
 \end{enumerate}
 
 Whether it's the ``Golden Window'' for Power Play timing or the ``Risk-Aware'' selection of defensive shots, our tool empowers teams to master the ``Art of the Steal.''
